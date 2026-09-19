@@ -1176,6 +1176,8 @@ function syncObserve() {
  if(sig!==syncObserved.sig){doc.metaUpdatedAt=Date.now();syncEngine.markNotebook();}
  syncObserved={pages,trash,sig};
 }
+{const box=$('sync-tools');try{box.open=localStorage.getItem('yohaku-sync-open')==='1';}catch{}
+ box.addEventListener('toggle',()=>{try{localStorage.setItem('yohaku-sync-open',box.open?'1':'0');}catch{}});}
 function syncSetStatus(state,detail,error) {
  const el=$('sync-status'),text=$('sync-status-text'),badge=$('sync-badge');
  const map={off:['同期オフ','off','オフ',''],connecting:['接続中…','warn','接続中','warn'],online:['同期済み','','オン','on'],sending:['送信中 '+(detail||''),'warn','送信中','warn'],offline:['オフライン（後で送信）','warn','オフライン','warn'],error:['同期エラー','err','エラー','err']};
@@ -1246,9 +1248,9 @@ async function syncConnect(useFake) {
  });
  syncTransport.onAuth(user=>{
   syncUser=user;
-  $sync('signed-out').hidden=!!user;$sync('signed-in').hidden=!user;
+  $sync('signed-out').hidden=!!user;$sync('signed-in').hidden=!user;if(!user)$sync('who').textContent='';
   if(user){
-   $sync('account').textContent=user.email+' としてログイン中';
+   $sync('account').textContent=user.email+' としてログイン中';$sync('who').textContent=user.email;
    try{localStorage.setItem('yohaku-sync','on');}catch{}
    syncSnapshot();syncEngine.start(user.uid);
   } else {

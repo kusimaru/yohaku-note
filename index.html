@@ -25,7 +25,7 @@
  <div id="page-count" hidden>0</div><span id="list-title" hidden>ページ</span>
  <button id="trash-toggle" class="trash-toggle" aria-pressed="false" disabled><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>ゴミ箱 <span id="trash-count">0</span></button>
  <div id="item-menu" class="item-menu" role="menu" hidden><button type="button" id="menu-rename" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>名前の変更</button><div id="menu-colors" class="menu-colors" role="group" aria-label="色" hidden></div><button type="button" id="menu-delete" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="menu-delete-label">ゴミ箱へ移動</span></button></div>
- <details id="sync-tools" class="sync-tools" open><summary><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>クラウド同期 <span id="sync-badge" class="sync-badge">オフ</span></summary>
+ <details id="sync-tools" class="sync-tools"><summary title="押すと開閉します"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>クラウド同期 <span id="sync-who" class="sync-who"></span><span id="sync-badge" class="sync-badge">オフ</span><svg class="icon chev" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
   <div id="sync-signed-out">
    <p class="small">同じアカウントでログインした端末（PC・iPad）どうしで、メモを自動で同じにします。</p>
    <form id="sync-form">

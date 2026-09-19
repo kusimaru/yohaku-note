@@ -610,3 +610,13 @@ body .sidebar #pages{display:block;min-height:60px;flex:none;overflow:visible}
 .nav-pages .page-button.active .icon{color:#2f5a4a}
 .nav-pages .page-button>span{gap:8px}
 body .nav-pages .page-button small{margin-left:calc(var(--ui-icon) + 8px)}
+
+/* ---------- cloud sync box: a quiet one-line row until opened ---------- */
+.sync-tools{background:transparent;border-color:transparent;padding:0 4px;margin:2px 0 4px}
+.sync-tools[open]{background:#fff;border-color:#dce3d9;padding:0 10px 8px}
+body .sync-tools summary{font-size:var(--ui-fs-sm);min-height:auto;padding:7px 4px;color:#5f7166;font-weight:600}
+.sync-tools summary .chev{width:16px;height:16px;color:#8a948b;transition:transform .15s;margin-left:2px}
+.sync-tools[open] summary .chev{transform:rotate(180deg)}
+.sync-who{margin-left:auto;font-weight:400;color:#7e8e7d;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sync-who:empty{display:none}
+.sync-who:not(:empty)+.sync-badge{margin-left:6px}

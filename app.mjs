@@ -15,7 +15,7 @@ function icon(name,cls='') {
 const sheet=$('sheet'),canvas=$('canvas'),ctx=canvas.getContext('2d'),blocksLayer=$('blocks'),paper=$('paper'),selectionEl=$('selection'),marqueeEl=$('marquee'),lassoEl=$('lasso'),eraserCursor=$('eraser-cursor');
 let db,doc,ready=false,tool='text',eraserMode='part',eraserSize=8,color='#243c3a',width=4,gesture=null,scale=1,activeBlock=null;
 let selection={strokes:new Set(),blocks:new Set()},selectionLasso=null,arrowBatch=-1e9,selectMode='rect',dragging=null,view='pages',menuTarget=null,formMode=null,clearArmed=-1e9;
-const collapsedNotebooks=new Set();let selectedSectionId=null;
+const collapsedNotebooks=new Set();let selectedSectionId=null,lastShownSectionId=null;
 let pageSort='manual';try{pageSort=['manual','updated','name'].includes(localStorage.getItem('yohaku-page-sort'))?localStorage.getItem('yohaku-page-sort'):'manual';}catch{}
 let dirty=false,saving=false,revision=0,saveFailed=false,lastInkEnd=-1e9,editing=null,lastPaperWidth=0;
 const histories=new Map();
@@ -95,8 +95,10 @@ function renderPages() {
 }
 function renderNotebooks() {
  const box=$('notebooks');box.replaceChildren();const cur=currentSection();
+ // when the open section changes (page opened, section picked, page moved), reveal its notebook; otherwise respect the user's fold
+ if(cur.id!==lastShownSectionId){lastShownSectionId=cur.id;collapsedNotebooks.delete(cur.notebookId);}
  for(const nb of doc.notebooks){
-  const secs=sectionsIn(doc,nb.id),open=!collapsedNotebooks.has(nb.id)||secs.some(x=>x.id===cur.id);
+  const secs=sectionsIn(doc,nb.id),open=!collapsedNotebooks.has(nb.id);
   const wrap=el('div','notebook'+(open?'':' collapsed'));wrap.dataset.notebookId=nb.id;
   const head=el('div','notebook-head');
   const btn=el('button','notebook-button');btn.type='button';btn.draggable=true;btn.dataset.notebookId=nb.id;btn.setAttribute('aria-expanded',String(open));btn.title='クリックで開閉 / ドラッグで並べ替え';

@@ -703,6 +703,10 @@ for(const event of ['pointerup','pointercancel','lostpointercapture'])sheet.addE
 // default-prevented can be taken over by page scrolling or Scribble, and the
 // stroke is cancelled. Touch listeners are non-passive so preventDefault works.
 const stylusTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType==='stylus');
+// iPad / iPhone: the OS tells stylus and finger apart, so fingers may scroll the page even in
+// pen mode (stylus touches are default-prevented above). Other platforms keep touch-action:none.
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+if(isIOS)document.body.classList.add('ios');
 const activeGesture=()=>gesture&&['ink','lasso','marquee','drag','move','resize'].includes(gesture.type);
 sheet.addEventListener('touchstart',e=>{
  if(!ready||document.body.classList.contains('reading'))return;

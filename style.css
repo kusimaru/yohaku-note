@@ -434,3 +434,7 @@ button,summary{-webkit-tap-highlight-color:transparent}
 #layer-close{padding:2px;border-color:transparent;background:transparent}
 #layer-close .icon{width:16px;height:16px}
 @media(max-width:700px){.modes button{padding:8px 9px;font-size:12px}.group-label{display:none}}
+
+/* iPad: finger scrolls, Apple Pencil draws (see touchstart handling in app.mjs) */
+body.ios .sheet.ink,body.ios .sheet.select{touch-action:pan-x pan-y pinch-zoom}
+body.ios .sheet.select .block{touch-action:none}

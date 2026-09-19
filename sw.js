@@ -1,4 +1,4 @@
-const CACHE='yohaku-web-v2';
+const CACHE='yohaku-web-v3';
 const ASSETS=['./','./index.html','./style.css','./app.mjs','./model.mjs','./storage.mjs','./richtext.mjs','./svgexport.mjs','./icon.svg','./manifest.webmanifest'].map(p=>new URL(p,self.location).href);
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('yohaku-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});

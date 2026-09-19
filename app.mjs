@@ -268,7 +268,7 @@ function layout() {
  const dpr=Math.min(devicePixelRatio||1,3);
  canvas.width=Math.max(1,Math.round(W*scale*dpr));canvas.height=Math.max(1,Math.round(p.height*scale*dpr));
  ctx.setTransform(canvas.width/W,0,0,canvas.height/p.height,0,0);
- $('page-size').textContent='ページの高さ '+p.height+' / 最大 '+MAX_HEIGHT;$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;
+ $('page-size').textContent='ページの高さ '+p.height+' / 最大 '+MAX_HEIGHT;$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;$('fab-grow').disabled=!ready||p.height>=MAX_HEIGHT;
  redraw();
 }
 new ResizeObserver(()=>{if(paper.clientWidth!==lastPaperWidth){lastPaperWidth=paper.clientWidth;layout();}}).observe(paper);
@@ -926,7 +926,18 @@ $('width').oninput=e=>{width=Number(e.target.value);$('width-value').value=width
 $('page-title').oninput=e=>{page().title=e.target.value;breadcrumb();changed();renderPages();};
 $('page-category').oninput=e=>{page().category=e.target.value;breadcrumb();changed();};
 $('page-category').onchange=e=>{const v=e.target.value.trim();e.target.value=v;page().category=v;if(v)addCategory(doc,v);changed();renderPages();};
-$('grow-page').onclick=()=>{finish();const p=page(),before=snapshot(p);if(growPage(p,p.height+400))commit(before);};
+function growAndReveal() {
+ finish();const p=page(),before=snapshot(p),prev=p.height;
+ if(!growPage(p,p.height+400)){message('このページは上限（'+MAX_HEIGHT+'）まで広がっています。左の「ページを追加」で次のページを作ってください。');return;}
+ commit(before);
+ // show the new space: scroll so that the old bottom edge sits in view
+ const rect=sheet.getBoundingClientRect(),target=rect.top+prev*scale-Math.max(120,innerHeight*.45);
+ window.scrollBy({top:target,behavior:'smooth'});
+ message('ページを下に広げました（高さ '+p.height+' / 最大 '+MAX_HEIGHT+'）。');
+}
+$('grow-page').onclick=growAndReveal;$('fab-grow').onclick=growAndReveal;
+$('fab-bottom').onclick=()=>{const r=sheet.getBoundingClientRect();window.scrollBy({top:r.bottom-innerHeight+80,behavior:'smooth'});};
+$('fab-top').onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
 $('add-page').onclick=()=>{
  if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return;}
  const c=categoryOf(page());showForm({kind:'new-page'},'新しいページ'+(c?'（'+c+'）':''),'','作成');

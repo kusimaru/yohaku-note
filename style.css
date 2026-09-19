@@ -438,3 +438,14 @@ button,summary{-webkit-tap-highlight-color:transparent}
 /* iPad: finger scrolls, Apple Pencil draws (see touchstart handling in app.mjs) */
 body.ios .sheet.ink,body.ios .sheet.select{touch-action:pan-x pan-y pinch-zoom}
 body.ios .sheet.select .block{touch-action:none}
+
+/* Always-reachable page controls (bottom right), so the page can be extended without scrolling to the footer */
+.page-fab{position:fixed;right:16px;bottom:16px;z-index:55;display:flex;gap:6px;align-items:center;background:#ffffffee;border:1px solid #cfddc9;border-radius:12px;padding:6px;box-shadow:0 8px 28px #233f3522;backdrop-filter:blur(6px)}
+.page-fab button{font-size:12px;min-height:40px;padding:8px 12px;background:#fff}
+.page-fab button.icon-only{min-width:40px;padding:8px}
+.page-fab #fab-grow{background:#294e48;color:#fff;border-color:#294e48;font-weight:600}
+.page-fab #fab-grow:hover:not(:disabled){background:#3b645b}
+.page-fab #fab-grow:disabled{background:#9fb3aa;border-color:#9fb3aa;color:#fff;opacity:1}
+.page-fab .icon{width:16px;height:16px}
+body.reading .page-fab #fab-grow{display:none}
+@media(max-width:700px){.page-fab{right:10px;bottom:10px;padding:4px}.page-fab button{font-size:11px}}

@@ -536,3 +536,60 @@ body .empty-hint small{font-size:var(--ui-fs-sm)}
 
 /* narrow screens: let tool groups wrap instead of overflowing the page */
 @media(max-width:700px){body .tool-group,body .text-tools,body .view-actions,body .view-strip{flex-wrap:wrap}body .toolbar,body .text-tools,body .tool-group{max-width:100%;overflow:hidden}body #fmt-color-clear,body .sizes .fmt-size{padding:6px 8px}}
+
+/* ---------- OneNote-like navigation: notebooks › sections | pages ---------- */
+:root{--rail:500px}
+body[data-ui="large"]{--rail:540px}
+body[data-ui="xlarge"]{--rail:590px}
+.nav-cols{display:flex;flex:1;min-height:160px;gap:0;margin:6px -8px 8px;border-top:1px solid #dce3d9}
+.nav-col{overflow:auto;min-height:0;padding:8px}
+.nav-notebooks{flex:0 0 48%;background:#e6ebe4;border-right:1px solid #d8dfd9;border-radius:0 0 0 10px}
+.nav-pages{flex:1;background:#f4f6f2}
+.notebook{margin-bottom:10px}
+.notebook-head{display:flex;align-items:center;position:relative}
+.notebook-button{flex:1;min-width:0;display:flex;align-items:center;gap:6px;background:transparent;border-color:transparent;text-align:left;font-weight:700;color:#253d37;padding:8px 6px;min-height:var(--ui-btn);cursor:pointer}
+.notebook-button .chev{transition:transform .15s;width:16px;height:16px;color:#7b8a80}
+.notebook.collapsed .notebook-button .chev{transform:rotate(-90deg)}
+.nb-icon{flex:none;width:18px;height:22px;border-radius:3px 6px 6px 3px;background:var(--sec,#c2185b);box-shadow:inset 3px 0 0 #ffffff88}
+.notebook-button .nb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sections{padding-left:6px}
+.section-row{display:flex;align-items:center;position:relative;margin:2px 0}
+.section-tab{flex:1;min-width:0;display:flex;align-items:center;gap:8px;background:transparent;border-color:transparent;text-align:left;padding:8px 8px 8px 10px;min-height:var(--ui-btn);border-radius:8px;color:#2b3f38;cursor:pointer}
+.section-tab .sec-color{flex:none;width:7px;height:22px;border-radius:4px;background:var(--sec,#c2185b)}
+.section-tab .sec-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.section-tab.active{background:#fff;box-shadow:0 1px 3px #263d3814;font-weight:700}
+.section-tab:hover:not(:disabled){background:#ffffffb0}
+.section-row .item-menu-button{top:50%;transform:translateY(-50%)}
+.add-section-link,.add-notebook{display:flex;align-items:center;gap:6px;background:transparent;border-color:transparent;color:#5a3ea6;font-weight:600;padding:8px 8px;min-height:var(--ui-btn);text-align:left;width:100%}
+.add-section-link:hover:not(:disabled),.add-notebook:hover:not(:disabled){background:#ffffffb0}
+.add-section-link .icon,.add-notebook .icon{color:#5a3ea6}
+.pages-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.add-page{flex:1;justify-content:flex-start;color:#5a3ea6;border-color:#c9c3e6;background:#fff;font-weight:600}
+.add-page .icon{color:#5a3ea6}
+.current-section{display:flex;align-items:center;gap:8px;font-size:var(--ui-fs-sm);color:#5f7166;margin:4px 4px 6px;font-weight:600}
+.current-section .sec-color{width:6px;height:16px;border-radius:3px;background:var(--sec,#c2185b)}
+.nav-pages .page-button{background:transparent;border-color:transparent;border-radius:8px;padding:10px 12px;margin:1px 0}
+.nav-pages .page-button.active{background:#e2e6df;font-weight:700}
+.nav-pages .page-button .icon{display:none}
+.nav-pages .page-button>span>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-pages .page-button small{margin-left:0}
+.pages-empty{font-size:var(--ui-fs-sm);color:#8a948b;padding:12px 6px;line-height:1.7}
+.section-tab.drop-into,.notebook-head.drop-into,.nav-pages.drop-into{outline:2px dashed #4268b0;outline-offset:-2px;border-radius:8px}
+.section-tab.drop-before,.notebook-head.drop-before{box-shadow:0 -3px 0 0 #4268b0}
+.section-tab.drop-after,.notebook-head.drop-after{box-shadow:0 3px 0 0 #4268b0}
+.section-tab.dragging,.notebook-button.dragging{opacity:.4}
+.menu-colors{display:flex;flex-wrap:wrap;gap:6px;padding:6px 10px;border-top:1px solid #eef1ec;border-bottom:1px solid #eef1ec;margin:4px 0}
+.menu-colors[hidden]{display:none}
+.menu-colors button{width:26px;height:26px;min-height:26px;padding:0;border-radius:6px;border:2px solid #fff;box-shadow:0 0 0 1px #d5dcd6;background:var(--sec)}
+.menu-colors button.current{outline:2px solid #253d37;outline-offset:1px}
+body .sidebar #pages{display:block;min-height:60px;flex:none;overflow:visible}
+#page-section{max-width:100%;font-size:var(--ui-fs);min-height:var(--ui-btn);padding:6px 10px;border:1px solid #dce3dd;border-radius:6px;background:#fff}
+@media(max-width:1180px){body .sidebar{width:min(var(--rail),94vw)}}
+@media(max-width:700px){.nav-cols{flex-direction:column}.nav-notebooks{flex:none;border-right:0;border-bottom:1px solid #d8dfd9;max-height:40vh}}
+
+/* the navigation gets most of the sidebar height */
+.nav-cols{min-height:46vh}
+
+/* trash view uses the page column only */
+.nav-cols.trash .nav-notebooks,.nav-cols.trash .pages-head,.nav-cols.trash .current-section,.nav-cols.trash .list-tip{display:none}
+.nav-cols.trash .nav-pages{flex:1}

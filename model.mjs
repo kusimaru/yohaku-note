@@ -71,9 +71,10 @@ export function moveLayer(page,id,toIndex) {
  const rest=page.layers.filter(l=>l.id!==id),index=Math.max(0,Math.min(rest.length,toIndex));
  rest.splice(index,0,layer);page.layers=rest;return true;
 }
-export function newPage(title='新しいページ',category='') {
+export function newPage(title='新しいページ',sectionId='') {
  const layer=newLayer();
- return {id:crypto.randomUUID(),title,category,blocks:[newTextBlock()],height:1200,strokes:[],layers:[layer],activeLayer:layer.id,updatedAt:Date.now()};
+ const p={id:crypto.randomUUID(),title,blocks:[newTextBlock()],height:1200,strokes:[],layers:[layer],activeLayer:layer.id,updatedAt:Date.now()};
+ if(sectionId)p.sectionId=sectionId;return p;
 }
 export function inkWidth(width,pressure,enabled) {
  return width*(enabled?.25+Math.max(0,Math.min(1,pressure))*1.5:1);
@@ -105,16 +106,25 @@ function sampleStroke(s) {
 // Split a stroke into fragments where `inside(point)` holds and where it does not.
 // Fragments keep colour/width/pressure; boundary points are located by bisection so
 // each fragment ends on its own side of the boundary.
+const MIN_FRAGMENT=2; // px: slivers shorter than this (a stroke grazing the boundary) join the previous piece
+const polyLength=pts=>{let n=0;for(let i=1;i<pts.length;i++)n+=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);return n;};
 export function partitionStroke(s,inside) {
  const samples=sampleStroke(s),result={true:[],false:[]};
- let fragment=[],current=inside(samples[0]);
- const flush=()=>{if(fragment.length)result[current].push({...s,points:fragment});fragment=[];};
+ let fragment=[],current=inside(samples[0]),last=null;
+ const flush=()=>{
+  if(!fragment.length)return false;
+  if(last&&polyLength(fragment)<MIN_FRAGMENT){last.points.push(...fragment);fragment=[];return true;}
+  last={...s,points:fragment};result[current].push(last);fragment=[];return false;
+ };
  for(let i=0;i<samples.length;i++){
   const p=samples[i],cut=inside(p);
   if(cut!==current){
    let lo=0,hi=1;const prev=samples[i-1];
    for(let j=0;j<14;j++){const mid=(lo+hi)/2;if(inside(mix(prev,p,mid))===current)lo=mid;else hi=mid;}
-   fragment.push(mix(prev,p,lo));flush();current=cut;fragment.push(mix(prev,p,hi));
+   fragment.push(mix(prev,p,lo));const merged=flush();current=cut;
+   // a sliver was folded into the previous piece: keep extending that piece instead of opening a new one
+   if(merged){const arr=result[current];if(arr[arr.length-1]===last){arr.pop();fragment=last.points;}}
+   fragment.push(mix(prev,p,hi));
   }
   fragment.push(p);
  }
@@ -145,53 +155,90 @@ export function splitByPolygon(s,polygon) {
  if(!parts.outside.length)return {inside:[s],outside:[]};
  return parts;
 }
-export const categoryOf=p=>(p.category||'').trim();
-// Keep doc.categories as the ordered list of sections: stored order first, then any
-// category that only exists on pages. Empty categories stay so they can hold pages later.
-export function normalizeCategories(doc) {
- const list=[],seen=new Set();
- for(const c of doc.categories||[]){const t=String(c).trim();if(t&&!seen.has(t)){seen.add(t);list.push(t);}}
- for(const p of doc.pages){const c=categoryOf(p);if(c&&!seen.has(c)){seen.add(c);list.push(c);}}
- doc.categories=list;return doc;
+// ---- notebooks › sections › pages (OneNote-like) ----
+export const SECTION_COLORS=['#c2185b','#1e5bb8','#2e9e5b','#d94a3d','#7b3fb0','#e08a00','#0f9c8a','#5c6bc0','#8d6e63','#546e7a'];
+export const DEFAULT_NOTEBOOK_ID='nb:default';
+export const categoryOf=p=>(p.category||'').trim(); // legacy field from the single-level version
+const pickColor=i=>SECTION_COLORS[i%SECTION_COLORS.length];
+const cleanName=(name,fallback)=>String(name??'').trim().slice(0,60)||fallback;
+function uniqueName(names,base){let n=base,i=2;while(names.includes(n))n=base+' '+i++;return n;}
+export function newNotebook(name,color){return {id:crypto.randomUUID(),name:cleanName(name,'新しいノートブック'),color:color||pickColor(0)};}
+export function newSection(notebookId,name,color){return {id:crypto.randomUUID(),notebookId,name:cleanName(name,'新しいセクション'),color:color||pickColor(0)};}
+export const notebookOf=(doc,id)=>(doc.notebooks||[]).find(n=>n.id===id);
+export const sectionOf=(doc,id)=>(doc.sections||[]).find(s=>s.id===id);
+export const sectionsIn=(doc,notebookId)=>(doc.sections||[]).filter(s=>s.notebookId===notebookId);
+export const pagesIn=(doc,sectionId)=>doc.pages.filter(p=>p.sectionId===sectionId);
+// Fill in the structure: a default notebook, sections migrated from the old category names
+// (deterministic ids so two devices migrate the same way), and every page inside a section.
+// A page that points at a section this device does not know yet gets a placeholder section
+// (the real name arrives later through sync). Returns true when anything was changed.
+export function ensureStructure(doc) {
+ let changed=false;
+ if(!Array.isArray(doc.notebooks)||!doc.notebooks.length){doc.notebooks=[{id:DEFAULT_NOTEBOOK_ID,name:'わたしのノート',color:pickColor(0)}];changed=true;}
+ if(!Array.isArray(doc.sections)){doc.sections=[];changed=true;}
+ const home=doc.notebooks[0].id,nbIds=new Set(doc.notebooks.map(n=>n.id));
+ for(const s of doc.sections)if(!nbIds.has(s.notebookId)){s.notebookId=home;changed=true;}
+ const byId=id=>doc.sections.find(s=>s.id===id);
+ const legacy=[...(doc.categories||[]),...doc.pages.map(p=>categoryOf(p))].filter(Boolean);
+ for(const name of legacy){
+  if(byId('sec:'+name)||doc.sections.some(s=>s.notebookId===home&&s.name===name))continue;
+  doc.sections.push({id:'sec:'+name,notebookId:home,name,color:pickColor(doc.sections.length)});changed=true;
+ }
+ const memo=()=>{let m=byId('sec:メモ');if(!m){m={id:'sec:メモ',notebookId:home,name:'メモ',color:pickColor(doc.sections.length)};doc.sections.push(m);changed=true;}return m;};
+ for(const p of doc.pages){
+  if(typeof p.sectionId==='string'&&p.sectionId){
+   if(!byId(p.sectionId)){doc.sections.push({id:p.sectionId,notebookId:home,name:'セクション',color:pickColor(doc.sections.length)});changed=true;}
+  } else {
+   const name=categoryOf(p);
+   const sec=name?(byId('sec:'+name)||doc.sections.find(s=>s.notebookId===home&&s.name===name)||memo()):memo();
+   p.sectionId=sec.id;changed=true;
+  }
+  if(p.category!==undefined){delete p.category;changed=true;}
+ }
+ if(!doc.sections.length){memo();}
+ if(doc.categories!==undefined){delete doc.categories;changed=true;}
+ return changed;
 }
-export function addCategory(doc,name) {
- const t=String(name).trim();if(!t||t.length>60)return null;
- normalizeCategories(doc);if(!doc.categories.includes(t))doc.categories.push(t);return t;
+export function addNotebook(doc,name) {
+ ensureStructure(doc);
+ const nb=newNotebook(name||uniqueName(doc.notebooks.map(n=>n.name),'新しいノートブック'),pickColor(doc.notebooks.length));
+ doc.notebooks.push(nb);return nb;
 }
-export function removeCategory(doc,name) {
- normalizeCategories(doc);
- if(doc.pages.some(p=>categoryOf(p)===name))return false;
- doc.categories=doc.categories.filter(c=>c!==name);return true;
+export function addSection(doc,notebookId,name) {
+ ensureStructure(doc);if(!notebookOf(doc,notebookId))return null;
+ const sibs=sectionsIn(doc,notebookId);
+ const sec=newSection(notebookId,name||uniqueName(sibs.map(s=>s.name),'新しいセクション'),pickColor(doc.sections.length));
+ doc.sections.push(sec);return sec;
 }
-// Move a page into `category`, placed before page `beforeId` (same category) or at the
-// end of that category when beforeId is null.
-export function movePage(doc,pageId,category,beforeId=null) {
- const p=doc.pages.find(x=>x.id===pageId);if(!p||beforeId===pageId)return false;
- const rest=doc.pages.filter(x=>x.id!==pageId);p.category=category.trim();
- let index=beforeId?rest.findIndex(x=>x.id===beforeId&&categoryOf(x)===p.category):-1;
- if(index<0){index=rest.length;for(let i=rest.length-1;i>=0;i--)if(categoryOf(rest[i])===p.category){index=i+1;break;}}
- rest.splice(index,0,p);doc.pages=rest;
- if(p.category)addCategory(doc,p.category);return true;
+export function renameNotebook(doc,id,name){const nb=notebookOf(doc,id),t=String(name??'').trim();if(!nb||!t||t.length>60)return null;nb.name=t;return t;}
+export function renameSection(doc,id,name){const sec=sectionOf(doc,id),t=String(name??'').trim();if(!sec||!t||t.length>60)return null;sec.name=t;return t;}
+export function setSectionColor(doc,id,color){const sec=sectionOf(doc,id);if(!sec||!/^#[0-9a-f]{6}$/i.test(color||''))return false;sec.color=color.toLowerCase();return true;}
+export function setNotebookColor(doc,id,color){const nb=notebookOf(doc,id);if(!nb||!/^#[0-9a-f]{6}$/i.test(color||''))return false;nb.color=color.toLowerCase();return true;}
+// Move a page into `sectionId`, placed before page `beforeId` (same section) or at the end.
+export function movePage(doc,pageId,sectionId,beforeId=null) {
+ const p=doc.pages.find(x=>x.id===pageId);if(!p||beforeId===pageId||!sectionOf(doc,sectionId))return false;
+ const rest=doc.pages.filter(x=>x.id!==pageId);p.sectionId=sectionId;
+ let index=beforeId?rest.findIndex(x=>x.id===beforeId&&x.sectionId===sectionId):-1;
+ if(index<0){index=rest.length;for(let i=rest.length-1;i>=0;i--)if(rest[i].sectionId===sectionId){index=i+1;break;}}
+ rest.splice(index,0,p);doc.pages=rest;return true;
 }
-export function moveCategory(doc,name,beforeName=null) {
- normalizeCategories(doc);
- if(!doc.categories.includes(name)||name===beforeName)return false;
- const rest=doc.categories.filter(c=>c!==name);
- const index=beforeName?rest.indexOf(beforeName):-1;
- rest.splice(index<0?rest.length:index,0,name);doc.categories=rest;return true;
+export function moveSection(doc,id,notebookId,beforeId=null) {
+ const sec=sectionOf(doc,id);if(!sec||!notebookOf(doc,notebookId)||beforeId===id)return false;
+ const rest=doc.sections.filter(x=>x.id!==id);sec.notebookId=notebookId;
+ let index=beforeId?rest.findIndex(x=>x.id===beforeId&&x.notebookId===notebookId):-1;
+ if(index<0){index=rest.length;for(let i=rest.length-1;i>=0;i--)if(rest[i].notebookId===notebookId){index=i+1;break;}}
+ rest.splice(index,0,sec);doc.sections=rest;return true;
+}
+export function moveNotebook(doc,id,beforeId=null) {
+ const nb=notebookOf(doc,id);if(!nb||beforeId===id)return false;
+ const rest=doc.notebooks.filter(x=>x.id!==id);const index=beforeId?rest.findIndex(x=>x.id===beforeId):-1;
+ rest.splice(index<0?rest.length:index,0,nb);doc.notebooks=rest;return true;
 }
 // ---- trash ----
 function ensureActive(doc,removedIndex) {
- if(!doc.pages.length)doc.pages.push(newPage('はじめのページ'));
+ ensureStructure(doc);
+ if(!doc.pages.length){const p=newPage('はじめのページ',doc.sections[0].id);doc.pages.push(p);}
  if(!doc.pages.some(p=>p.id===doc.activeId))doc.activeId=doc.pages[Math.min(Math.max(0,removedIndex),doc.pages.length-1)].id;
-}
-export function renameCategory(doc,oldName,newName) {
- const next=String(newName).trim();normalizeCategories(doc);
- if(!next||next.length>60||!doc.categories.includes(oldName))return null;
- if(next===oldName)return next;
- for(const p of doc.pages)if(categoryOf(p)===oldName)p.category=next;
- doc.categories=doc.categories.includes(next)?doc.categories.filter(c=>c!==oldName):doc.categories.map(c=>c===oldName?next:c);
- return next;
 }
 export function deletePage(doc,id) {
  const i=doc.pages.findIndex(p=>p.id===id);if(i<0)return null;
@@ -199,24 +246,45 @@ export function deletePage(doc,id) {
  const entry={id:crypto.randomUUID(),kind:'page',name:p.title,pages:[p],deletedAt:Date.now()};
  (doc.trash??=[]).push(entry);ensureActive(doc,i);return entry;
 }
-export function deleteCategory(doc,name) {
- normalizeCategories(doc);if(!name||!doc.categories.includes(name))return null;
- const first=doc.pages.findIndex(p=>categoryOf(p)===name);
- const pages=doc.pages.filter(p=>categoryOf(p)===name);doc.pages=doc.pages.filter(p=>categoryOf(p)!==name);
- doc.categories=doc.categories.filter(c=>c!==name);
- const entry={id:crypto.randomUUID(),kind:'category',name,pages,deletedAt:Date.now()};
+export function deleteSection(doc,id) {
+ ensureStructure(doc);const sec=sectionOf(doc,id);if(!sec)return null;
+ const first=doc.pages.findIndex(p=>p.sectionId===id);
+ const pages=doc.pages.filter(p=>p.sectionId===id);doc.pages=doc.pages.filter(p=>p.sectionId!==id);
+ doc.sections=doc.sections.filter(s=>s.id!==id);
+ const entry={id:crypto.randomUUID(),kind:'section',name:sec.name,section:{...sec},pages,deletedAt:Date.now()};
+ (doc.trash??=[]).push(entry);ensureActive(doc,first<0?0:first);return entry;
+}
+export function deleteNotebook(doc,id) {
+ ensureStructure(doc);const nb=notebookOf(doc,id);if(!nb||doc.notebooks.length<2)return null;
+ const sections=sectionsIn(doc,id),secIds=new Set(sections.map(s=>s.id));
+ const first=doc.pages.findIndex(p=>secIds.has(p.sectionId));
+ const pages=doc.pages.filter(p=>secIds.has(p.sectionId));doc.pages=doc.pages.filter(p=>!secIds.has(p.sectionId));
+ doc.sections=doc.sections.filter(s=>!secIds.has(s.id));doc.notebooks=doc.notebooks.filter(n=>n.id!==id);
+ const entry={id:crypto.randomUUID(),kind:'notebook',name:nb.name,notebook:{...nb},sections:sections.map(s=>({...s})),pages,deletedAt:Date.now()};
  (doc.trash??=[]).push(entry);ensureActive(doc,first<0?0:first);return entry;
 }
 export function restoreTrash(doc,entryId) {
  const i=(doc.trash||[]).findIndex(t=>t.id===entryId);if(i<0)return null;
- const [entry]=doc.trash.splice(i,1);
- if(entry.kind==='category')addCategory(doc,entry.name);
- for(const p of entry.pages){
-  if(entry.kind==='category')p.category=entry.name;
-  if(doc.pages.some(x=>x.id===p.id))p.id=crypto.randomUUID();
-  doc.pages.push(p);movePage(doc,p.id,categoryOf(p));
+ const [entry]=doc.trash.splice(i,1);ensureStructure(doc);
+ const home=doc.notebooks[0].id;
+ if(entry.kind==='notebook'){
+  if(!notebookOf(doc,entry.notebook.id))doc.notebooks.push({...entry.notebook});
+  for(const s of entry.sections||[])if(!sectionOf(doc,s.id))doc.sections.push({...s,notebookId:entry.notebook.id});
+ } else if(entry.kind==='section'){
+  const s=entry.section||{id:'sec:'+entry.name,name:entry.name,color:pickColor(doc.sections.length)};
+  if(!sectionOf(doc,s.id))doc.sections.push({...s,notebookId:notebookOf(doc,s.notebookId)?s.notebookId:home});
+  for(const p of entry.pages)p.sectionId=s.id;
+ } else if(entry.kind==='category'){
+  let s=doc.sections.find(x=>x.notebookId===home&&x.name===entry.name);
+  if(!s){s={id:'sec:'+entry.name,notebookId:home,name:entry.name,color:pickColor(doc.sections.length)};doc.sections.push(s);}
+  for(const p of entry.pages){p.sectionId=s.id;delete p.category;}
  }
- normalizeCategories(doc);
+ for(const p of entry.pages){
+  if(doc.pages.some(x=>x.id===p.id))p.id=crypto.randomUUID();
+  if(!sectionOf(doc,p.sectionId))p.sectionId=doc.sections[0].id;
+  doc.pages.push(p);movePage(doc,p.id,p.sectionId);
+ }
+ ensureStructure(doc);
  if(entry.pages[0])doc.activeId=entry.pages[0].id;
  return entry;
 }
@@ -226,10 +294,13 @@ export function purgeTrash(doc,entryId) {
 }
 export function emptyTrash(doc){const n=(doc.trash||[]).length;doc.trash=[];return n;}
 // Merge a backup from another device: same page id → keep the newer one (by updatedAt),
-// unknown id → add, id sitting in this notebook's trash → leave in the trash. Categories and
-// trash entries are unioned. Returns counts for the user.
+// unknown id → add, id sitting in this notebook's trash → leave in the trash. Notebooks,
+// sections and trash entries are unioned by id. Returns counts for the user.
 export function mergeNotebook(doc,incoming) {
  const result={added:0,updated:0,unchanged:0,skipped:0};
+ ensureStructure(doc);ensureStructure(incoming);
+ for(const nb of incoming.notebooks)if(!notebookOf(doc,nb.id))doc.notebooks.push({...nb});
+ for(const sec of incoming.sections)if(!sectionOf(doc,sec.id))doc.sections.push({...sec});
  const trashIds=new Set((doc.trash||[]).flatMap(t=>t.pages.map(p=>p.id)));
  for(const p of incoming.pages){
   const i=doc.pages.findIndex(x=>x.id===p.id);
@@ -237,10 +308,9 @@ export function mergeNotebook(doc,incoming) {
   if(trashIds.has(p.id)){result.skipped++;continue;}
   doc.pages.push(p);result.added++;
  }
- const cats=new Set(doc.categories||[]);doc.categories=[...(doc.categories||[]),...(incoming.categories||[]).filter(c=>!cats.has(c))];
  const trashSeen=new Set((doc.trash||[]).map(t=>t.id));
  doc.trash=[...(doc.trash||[]),...(incoming.trash||[]).filter(t=>!trashSeen.has(t.id)&&!t.pages.some(pg=>doc.pages.some(x=>x.id===pg.id)))];
- normalizeCategories(doc);for(const pg of doc.pages)ensureLayers(pg);
+ ensureStructure(doc);for(const pg of doc.pages)ensureLayers(pg);
  if(!doc.pages.some(x=>x.id===doc.activeId))doc.activeId=doc.pages[0].id;
  return result;
 }
@@ -251,11 +321,17 @@ export function validateBackup(doc) {
   if(!Array.isArray(doc.categories)||doc.categories.length>500)bad();const seen=new Set();
   for(const c of doc.categories){if(typeof c!=='string'||!c.trim()||c.length>60||seen.has(c))bad();seen.add(c);}
  }
+ const hex=/^#[0-9a-f]{6}$/i,nbIds=new Set(),secIds=new Set();
+ const checkNotebook=n=>{if(!n||typeof n.id!=='string'||n.id.length>100||nbIds.has(n.id)||typeof n.name!=='string'||!n.name.trim()||n.name.length>60||!hex.test(n.color||''))bad();nbIds.add(n.id);};
+ const checkSection=x=>{if(!x||typeof x.id!=='string'||x.id.length>100||secIds.has(x.id)||typeof x.notebookId!=='string'||x.notebookId.length>100||typeof x.name!=='string'||!x.name.trim()||x.name.length>60||!hex.test(x.color||''))bad();secIds.add(x.id);};
+ if(doc.notebooks!==undefined){if(!Array.isArray(doc.notebooks)||doc.notebooks.length>100)bad();for(const n of doc.notebooks)checkNotebook(n);}
+ if(doc.sections!==undefined){if(!Array.isArray(doc.sections)||doc.sections.length>500)bad();for(const x of doc.sections)checkSection(x);}
  const ids=new Set();let points=0,totalImages=0;
  const checkPage=p=>{
   if(!p||typeof p.id!=='string'||p.id.length>100||ids.has(p.id)||typeof p.title!=='string'||p.title.length>120||
    !Number.isFinite(p.updatedAt)||!Array.isArray(p.strokes)||p.strokes.length>50000)bad();
   if(p.category!==undefined&&(typeof p.category!=='string'||p.category.length>60))bad();
+  if(p.sectionId!==undefined&&(typeof p.sectionId!=='string'||!p.sectionId||p.sectionId.length>100))bad();
   ids.add(p.id);
   const height=doc.version===1?PAGE_HEIGHT:p.height;
   if(!Number.isFinite(height)||height<760||height>MAX_HEIGHT)bad();
@@ -294,8 +370,10 @@ export function validateBackup(doc) {
  if(doc.trash!==undefined){
   if(!Array.isArray(doc.trash)||doc.trash.length>500)bad();
   for(const t of doc.trash){
-   if(!t||typeof t.id!=='string'||t.id.length>100||ids.has(t.id)||!['page','category'].includes(t.kind)||typeof t.name!=='string'||t.name.length>120||
+   if(!t||typeof t.id!=='string'||t.id.length>100||ids.has(t.id)||!['page','category','section','notebook'].includes(t.kind)||typeof t.name!=='string'||t.name.length>120||
     !Number.isFinite(t.deletedAt)||!Array.isArray(t.pages)||t.pages.length>500||(t.kind==='page'&&t.pages.length!==1))bad();
+   if(t.kind==='section'&&t.section!==undefined){const x=t.section;if(!x||typeof x.id!=='string'||typeof x.name!=='string'||x.name.length>60||!hex.test(x.color||''))bad();}
+   if(t.kind==='notebook'){const n=t.notebook;if(!n||typeof n.id!=='string'||typeof n.name!=='string'||n.name.length>60||!hex.test(n.color||''))bad();if(!Array.isArray(t.sections)||t.sections.length>500)bad();for(const x of t.sections)if(!x||typeof x.id!=='string'||typeof x.name!=='string'||x.name.length>60||!hex.test(x.color||''))bad();}
    ids.add(t.id);for(const p of t.pages)checkPage(p);
   }
  }

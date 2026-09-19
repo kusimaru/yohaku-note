@@ -1,4 +1,4 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, categoryOf, normalizeCategories, addCategory, removeCategory, movePage, moveCategory, renameCategory, deletePage, deleteCategory, restoreTrash, purgeTrash, emptyTrash, mergeNotebook } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, ensureStructure, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
@@ -15,7 +15,8 @@ function icon(name,cls='') {
 const sheet=$('sheet'),canvas=$('canvas'),ctx=canvas.getContext('2d'),blocksLayer=$('blocks'),paper=$('paper'),selectionEl=$('selection'),marqueeEl=$('marquee'),lassoEl=$('lasso'),eraserCursor=$('eraser-cursor');
 let db,doc,ready=false,tool='text',eraserMode='part',eraserSize=8,color='#243c3a',width=4,gesture=null,scale=1,activeBlock=null;
 let selection={strokes:new Set(),blocks:new Set()},selectionLasso=null,arrowBatch=-1e9,selectMode='rect',dragging=null,view='pages',menuTarget=null,formMode=null,clearArmed=-1e9;
-const collapsed=new Set();
+const collapsedNotebooks=new Set();let selectedSectionId=null;
+let pageSort='manual';try{pageSort=['manual','updated','name'].includes(localStorage.getItem('yohaku-page-sort'))?localStorage.getItem('yohaku-page-sort'):'manual';}catch{}
 let dirty=false,saving=false,revision=0,saveFailed=false,lastInkEnd=-1e9,editing=null,lastPaperWidth=0;
 const histories=new Map();
 const page=()=>doc.pages.find(p=>p.id===doc.activeId);
@@ -70,112 +71,161 @@ function commit(before,p=page()) {
 function syncHistory() {
  const h=historyFor(doc.activeId);$('undo').disabled=!ready||h.undo.length===0;$('redo').disabled=!ready||h.redo.length===0;
 }
-function categoryOrder() {
- normalizeCategories(doc);
- const names=[...doc.categories];
- if(doc.pages.some(p=>!categoryOf(p)))names.push('');
- return names;
+// ---- navigation: notebooks › sections | pages ----
+const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
+function currentSection() {
+ ensureStructure(doc);
+ if(selectedSectionId&&sectionOf(doc,selectedSectionId))return sectionOf(doc,selectedSectionId);
+ return sectionOf(doc,page().sectionId)||doc.sections[0];
 }
 function openPage(id) {
- if(id===doc.activeId)return;finish();doc.activeId=id;revision++;dirty=true;showPage();save();
+ if(id===doc.activeId){selectedSectionId=null;renderPages();return;}
+ finish();doc.activeId=id;selectedSectionId=null;revision++;dirty=true;showPage();save();
+}
+function selectSection(id) {
+ const first=pagesIn(doc,id)[0];
+ if(first){openPage(first.id);}else{selectedSectionId=id;renderPages();}
 }
 function renderPages() {
- $('pages').replaceChildren();closeMenu();
+ $('pages').replaceChildren();closeMenu();ensureStructure(doc);
  $('trash-count').textContent=(doc.trash||[]).length;$('trash-toggle').classList.toggle('active',view==='trash');$('trash-toggle').setAttribute('aria-pressed',String(view==='trash'));
+ document.querySelector('.nav-cols').classList.toggle('trash',view==='trash');
  if(view==='trash'){renderTrash();return;}
- $('list-title').textContent='ページ';$('list-tip').textContent='ドラッグで並べ替え・移動。「⋯」で名前の変更・削除';
- const names=categoryOrder();
- $('category-list').replaceChildren(...names.filter(c=>c).map(c=>{const o=document.createElement('option');o.value=c;return o;}));
- const showHeadings=names.length>1||names[0]!=='';
- for(const c of names){
-  const pages=doc.pages.map((p,i)=>[p,i]).filter(([p])=>categoryOf(p)===c);
-  const active=pages.some(([p])=>p.id===doc.activeId),open=!collapsed.has(c)||active;
-  const group=document.createElement('div');group.className='category'+(open?'':' collapsed');group.dataset.category=c;
-  if(showHeadings){
-   const heading=document.createElement('button');heading.type='button';heading.className='category-heading'+(open?'':' collapsed');
-   heading.dataset.category=c;heading.draggable=!!c;heading.title=c?'クリックで折りたたみ / ドラッグで並べ替え':'カテゴリのないページ';
-   const label=document.createElement('span');label.className='cat-name';label.textContent=c||'未分類';heading.setAttribute('aria-expanded',String(open));
-   const count=document.createElement('span');count.className='cat-count';count.textContent=pages.length;heading.append(icon('chevron-down','chev'),icon('folder','cat-icon'),label,count);
-   heading.onclick=()=>{if(collapsed.has(c))collapsed.delete(c);else collapsed.add(c);renderPages();};
-   const head=document.createElement('div');head.className='category-head';head.append(heading);
-   if(c)head.append(menuButton({type:'category',name:c,label:c}));
-   group.append(head);
-  }
-  const list=document.createElement('div');list.className='category-pages';list.dataset.category=c;
-  if(open)for(const [p,i] of pages){
-   const button=document.createElement('button');button.className='page-button'+(p.id===doc.activeId?' active':'');
-   button.dataset.pageId=p.id;button.draggable=true;button.setAttribute('aria-current',p.id===doc.activeId?'page':'false');
-   const name=document.createElement('span'),label=document.createElement('span');label.textContent=p.title||'名称未設定';name.append(icon('file'),label);button.append(name);
-   const sub=document.createElement('small');sub.textContent=String(i+1).padStart(2,'0')+'  /  '+new Date(p.updatedAt).toLocaleDateString('ja-JP');button.append(sub);
-   button.onclick=()=>openPage(p.id);
-   const item=document.createElement('div');item.className='page-item';item.append(button,menuButton({type:'page',id:p.id,label:p.title||'名称未設定'}));
-   list.append(item);
-  }
-  group.append(list);$('pages').append(group);
- }
- $('page-count').textContent=doc.pages.length;
+ renderNotebooks();renderPageList();renderSectionSelect();
 }
-// ---- item menu (rename / delete) ----
+function renderNotebooks() {
+ const box=$('notebooks');box.replaceChildren();const cur=currentSection();
+ for(const nb of doc.notebooks){
+  const secs=sectionsIn(doc,nb.id),open=!collapsedNotebooks.has(nb.id)||secs.some(x=>x.id===cur.id);
+  const wrap=el('div','notebook'+(open?'':' collapsed'));wrap.dataset.notebookId=nb.id;
+  const head=el('div','notebook-head');
+  const btn=el('button','notebook-button');btn.type='button';btn.draggable=true;btn.dataset.notebookId=nb.id;btn.setAttribute('aria-expanded',String(open));btn.title='クリックで開閉 / ドラッグで並べ替え';
+  const nbIcon=el('span','nb-icon');nbIcon.style.setProperty('--sec',nb.color);
+  btn.append(icon('chevron-down','chev'),nbIcon,el('span','nb-name',nb.name));
+  btn.onclick=()=>{if(collapsedNotebooks.has(nb.id))collapsedNotebooks.delete(nb.id);else collapsedNotebooks.add(nb.id);renderPages();};
+  head.append(btn,menuButton({type:'notebook',id:nb.id,label:nb.name}));wrap.append(head);
+  if(open){
+   const list=el('div','sections');
+   for(const sec of secs){
+    const row=el('div','section-row');
+    const tab=el('button','section-tab'+(sec.id===cur.id?' active':''));tab.type='button';tab.draggable=true;tab.dataset.sectionId=sec.id;tab.style.setProperty('--sec',sec.color);
+    tab.append(el('span','sec-color'),el('span','sec-name',sec.name));tab.title='クリックで開く / ドラッグで並べ替え・移動';
+    tab.onclick=()=>selectSection(sec.id);
+    row.append(tab,menuButton({type:'section',id:sec.id,label:sec.name}));list.append(row);
+   }
+   const add=el('button','add-section-link');add.type='button';add.dataset.notebookId=nb.id;add.append(icon('plus'),'新しいセクション');
+   add.onclick=()=>showForm({kind:'new-section',notebookId:nb.id},'新しいセクション（'+nb.name+'）','','作成');
+   list.append(add);wrap.append(list);
+  }
+  box.append(wrap);
+ }
+}
+function sortedPages(sectionId) {
+ const list=pagesIn(doc,sectionId);
+ if(pageSort==='updated')return [...list].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+ if(pageSort==='name')return [...list].sort((a,b)=>(a.title||'').localeCompare(b.title||'','ja'));
+ return list;
+}
+function renderPageList() {
+ const cur=currentSection(),head=$('current-section');head.replaceChildren();head.style.setProperty('--sec',cur.color);
+ const nb=notebookOf(doc,cur.notebookId);head.append(el('span','sec-color'),el('span','',(nb?nb.name+' › ':'')+cur.name));
+ const list=sortedPages(cur.id),box=$('pages');
+ for(const pg of list){
+  const button=el('button','page-button'+(pg.id===doc.activeId?' active':''));button.type='button';button.dataset.pageId=pg.id;button.draggable=true;button.setAttribute('aria-current',pg.id===doc.activeId?'page':'false');
+  const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(icon('file'),label);button.append(name);
+  const sub=el('small','',new Date(pg.updatedAt).toLocaleDateString('ja-JP'));button.append(sub);
+  button.onclick=()=>openPage(pg.id);
+  const item=el('div','page-item');item.append(button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));box.append(item);
+ }
+ if(!list.length)box.append(el('div','pages-empty','このセクションにはまだページがありません。「ページの追加」で作れます。'));
+ $('page-count').textContent=list.length;
+ const labels={manual:'手動（ドラッグ順）',updated:'更新日が新しい順',name:'名前順'};
+ $('sort-pages').title='並べ替え：'+labels[pageSort]+'（押すと切り替え）';$('sort-pages').classList.toggle('active',pageSort!=='manual');
+}
+$('sort-pages').onclick=()=>{pageSort=pageSort==='manual'?'updated':pageSort==='updated'?'name':'manual';try{localStorage.setItem('yohaku-page-sort',pageSort);}catch{}renderPageList();
+ const labels={manual:'手動（ドラッグ順）',updated:'更新日が新しい順',name:'名前順'};message('ページの並べ替え：'+labels[pageSort]);};
+function renderSectionSelect() {
+ const sel=$('page-section');sel.replaceChildren();const cur=page().sectionId;
+ for(const nb of doc.notebooks){
+  const g=document.createElement('optgroup');g.label=nb.name;
+  for(const sec of sectionsIn(doc,nb.id)){const o=document.createElement('option');o.value=sec.id;o.textContent=sec.name;if(sec.id===cur)o.selected=true;g.append(o);}
+  sel.append(g);
+ }
+}
+$('page-section').onchange=e=>{
+ const p=page();if(!movePage(doc,p.id,e.target.value))return;
+ touchPages([p.id]);changed();breadcrumb();renderPages();
+};
+// ---- item menu (rename / colour / delete) ----
 function menuButton(target) {
  const b=document.createElement('button');b.type='button';b.className='item-menu-button';b.append(icon('more'));b.draggable=false;
- b.setAttribute('aria-label',(target.type==='page'?'ページ「':'カテゴリ「')+target.label+'」のメニュー');b.setAttribute('aria-haspopup','menu');
+ const kind={page:'ページ',section:'セクション',notebook:'ノートブック'}[target.type];
+ b.setAttribute('aria-label',kind+'「'+target.label+'」のメニュー');b.setAttribute('aria-haspopup','menu');
  b.onclick=e=>{e.stopPropagation();openMenu(target,b.getBoundingClientRect(),b.parentElement);};
  return b;
 }
 function openMenu(target,rect,holder) {
  closeMenu();menuTarget={...target,holder};holder?.classList.add('menu-open');
  const menu=$('item-menu');menu.hidden=false;
+ const colors=$('menu-colors');colors.replaceChildren();
+ if(target.type!=='page'){
+  const current=target.type==='section'?sectionOf(doc,target.id)?.color:notebookOf(doc,target.id)?.color;
+  for(const c of SECTION_COLORS){const b=document.createElement('button');b.type='button';b.style.setProperty('--sec',c);b.title='色を変える';b.setAttribute('aria-label','色 '+c);if(c===current)b.classList.add('current');
+   b.onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;if(t.type==='section')setSectionColor(doc,t.id,c);else setNotebookColor(doc,t.id,c);changed();renderPages();};colors.append(b);}
+  colors.hidden=false;
+ } else colors.hidden=true;
  const left=Math.min(rect.left,innerWidth-menu.offsetWidth-8),top=rect.bottom+4+menu.offsetHeight>innerHeight?rect.top-menu.offsetHeight-4:rect.bottom+4;
  menu.style.left=Math.max(4,left)+'px';menu.style.top=Math.max(4,top)+'px';
- $('menu-delete-label').textContent=target.type==='page'?'ページをゴミ箱へ':'カテゴリをゴミ箱へ（中のページも）';
+ $('menu-delete-label').textContent=target.type==='page'?'ページをゴミ箱へ':target.type==='section'?'セクションをゴミ箱へ（中のページも）':'ノートブックをゴミ箱へ（中身ごと）';
+ $('menu-delete').disabled=target.type==='notebook'&&doc.notebooks.length<2;
  $('menu-rename').focus();
 }
 function closeMenu(){$('item-menu').hidden=true;menuTarget?.holder?.classList.remove('menu-open');menuTarget=null;}
 document.addEventListener('pointerdown',e=>{if(!$('item-menu').hidden&&!$('item-menu').contains(e.target))closeMenu();},{capture:true});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('item-menu').hidden)closeMenu();},{capture:true});
-$('pages').addEventListener('contextmenu',e=>{
- const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),ch=t?.closest('.category-heading');
- if(pb){e.preventDefault();openMenu({type:'page',id:pb.dataset.pageId,label:pageById(pb.dataset.pageId)?.title||''},{left:e.clientX,top:e.clientY,bottom:e.clientY},pb.parentElement);}
- else if(ch&&ch.dataset.category){e.preventDefault();openMenu({type:'category',name:ch.dataset.category,label:ch.dataset.category},{left:e.clientX,top:e.clientY,bottom:e.clientY},ch.parentElement);}
+document.querySelector('.sidebar').addEventListener('contextmenu',e=>{
+ const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),st=t?.closest('.section-tab'),nb=t?.closest('.notebook-button');
+ const at={left:e.clientX,top:e.clientY,bottom:e.clientY};
+ if(pb){e.preventDefault();openMenu({type:'page',id:pb.dataset.pageId,label:pageById(pb.dataset.pageId)?.title||''},at,pb.parentElement);}
+ else if(st){e.preventDefault();openMenu({type:'section',id:st.dataset.sectionId,label:sectionOf(doc,st.dataset.sectionId)?.name||''},at,st.parentElement);}
+ else if(nb){e.preventDefault();openMenu({type:'notebook',id:nb.dataset.notebookId,label:notebookOf(doc,nb.dataset.notebookId)?.name||''},at,nb.parentElement);}
 });
 $('menu-rename').onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;
  if(t.type==='page')showForm({kind:'rename-page',id:t.id},'ページの名前の変更',pageById(t.id)?.title||'','変更');
- else showForm({kind:'rename-category',name:t.name},'カテゴリの名前の変更',t.name,'変更');
+ else if(t.type==='section')showForm({kind:'rename-section',id:t.id},'セクションの名前の変更',sectionOf(doc,t.id)?.name||'','変更');
+ else showForm({kind:'rename-notebook',id:t.id},'ノートブックの名前の変更',notebookOf(doc,t.id)?.name||'','変更');
 };
 $('menu-delete').onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;
  finish();
- const entry=t.type==='page'?deletePage(doc,t.id):deleteCategory(doc,t.name);
- if(!entry)return;
- histories.delete(t.id);showPage();changed();
- message((t.type==='page'?'ページ「':'カテゴリ「')+(entry.name||'名称未設定')+'」をゴミ箱へ移動しました。左下の「ゴミ箱」から元に戻せます。');
+ const entry=t.type==='page'?deletePage(doc,t.id):t.type==='section'?deleteSection(doc,t.id):deleteNotebook(doc,t.id);
+ if(!entry){if(t.type==='notebook')message('最後のノートブックは削除できません。');return;}
+ histories.delete(t.id);selectedSectionId=null;showPage();changed();
+ const kind={page:'ページ',section:'セクション',notebook:'ノートブック'}[t.type];
+ message(kind+'「'+(entry.name||'名称未設定')+'」をゴミ箱へ移動しました。左下の「ゴミ箱」から元に戻せます。');
 };
 const DEFAULT_NAME='名称未設定';
-// Unique category name: 名称未設定, 名称未設定 2, 名称未設定 3 …
-function uniqueCategoryName(base=DEFAULT_NAME) {
- normalizeCategories(doc);let name=base,n=2;
- while(doc.categories.includes(name))name=base+' '+n++;
- return name;
-}
+function uniqueIn(names,base=DEFAULT_NAME){let name=base,n=2;while(names.includes(name))name=base+' '+n++;return name;}
 function showForm(mode,title,value,submitLabel) {
  formMode=mode;$('form-title').textContent=title;$('form-submit-label').textContent=submitLabel;
  const forPage=mode.kind==='rename-page'||mode.kind==='new-page';
- $('new-category-name').placeholder=forPage?'ページの名前（空欄なら「'+DEFAULT_NAME+'」）':'カテゴリ名（空欄なら「'+DEFAULT_NAME+'」）';$('new-category-name').maxLength=forPage?120:60;
+ $('new-category-name').placeholder=(forPage?'ページの名前':mode.kind.includes('notebook')?'ノートブックの名前':'セクションの名前')+'（空欄なら「'+DEFAULT_NAME+'」）';$('new-category-name').maxLength=forPage?120:60;
  $('new-category').hidden=false;$('new-category-name').value=value;$('new-category-name').focus();$('new-category-name').select();
 }
 // ---- trash view ----
 function renderTrash() {
- $('list-title').textContent='ゴミ箱';$('list-tip').textContent='「完全に削除」または「空にする」まで消えません';
  const back=document.createElement('button');back.type='button';back.className='trash-back';back.append(icon('back'),'ページ一覧へ戻る');back.onclick=()=>{view='pages';renderPages();};
  $('pages').append(back);
  const items=[...(doc.trash||[])].reverse();
  if(!items.length){const empty=document.createElement('div');empty.className='trash-empty';empty.textContent='ゴミ箱は空です';$('pages').append(empty);return;}
  for(const t of items){
   const item=document.createElement('div');item.className='trash-item';item.dataset.trashId=t.id;
-  const name=document.createElement('span');name.className='trash-name';name.append(icon(t.kind==='page'?'file':'folder'),' '+(t.name||'名称未設定')+(t.kind==='category'?'（'+t.pages.length+'ページ）':''));
+  const kindIcon={page:'file',section:'folder',category:'folder',notebook:'book'}[t.kind]||'file';
+  const kindLabel={section:'セクション',category:'セクション',notebook:'ノートブック'}[t.kind];
+  const name=document.createElement('span');name.className='trash-name';name.append(icon(kindIcon),' '+(t.name||'名称未設定')+(kindLabel?'（'+kindLabel+'・'+t.pages.length+'ページ）':''));
   const when=document.createElement('small');when.textContent='削除: '+new Date(t.deletedAt).toLocaleString('ja-JP');
   const row=document.createElement('div');
   const restore=document.createElement('button');restore.type='button';restore.className='restore';restore.append(icon('restore'),'元に戻す');
-  restore.onclick=()=>{finish();const e=restoreTrash(doc,t.id);if(!e)return;view='pages';showPage();changed();message('「'+(e.name||'名称未設定')+'」を元に戻しました。');};
+  restore.onclick=()=>{finish();const e=restoreTrash(doc,t.id);if(!e)return;view='pages';selectedSectionId=null;showPage();changed();message('「'+(e.name||'名称未設定')+'」を元に戻しました。');};
   const purge=document.createElement('button');purge.type='button';purge.className='purge';purge.append(icon('x'),'完全に削除');
   purge.onclick=()=>{if(purge.dataset.armed){purgeTrash(doc,t.id);changed();renderPages();}else{purge.dataset.armed='1';purge.replaceChildren(icon('x'),'もう一度押すと完全に削除');setTimeout(()=>{delete purge.dataset.armed;purge.replaceChildren(icon('x'),'完全に削除');},4000);}};
   row.append(restore,purge);item.append(name,when,row);$('pages').append(item);
@@ -189,85 +239,101 @@ function renderTrash() {
  $('pages').append(clear);
 }
 $('trash-toggle').onclick=()=>{view=view==='trash'?'pages':'trash';renderPages();};
-// ---- sidebar drag & drop (mouse) ----
-const pagesEl=$('pages');
-function clearDropMarks(){for(const el of pagesEl.querySelectorAll('.drop-before,.drop-after,.drop-into'))el.classList.remove('drop-before','drop-after','drop-into');}
+// ---- sidebar drag & drop (mouse): pages, sections, notebooks ----
+const navEl=document.querySelector('.sidebar');
+function clearDropMarks(){for(const x of navEl.querySelectorAll('.drop-before,.drop-after,.drop-into'))x.classList.remove('drop-before','drop-after','drop-into');}
 function dropTarget(e) {
  const t=e.target instanceof Element?e.target:null;if(!t||!dragging)return null;
- const pb=t.closest('.page-button'),ch=t.closest('.category-heading'),grp=t.closest('.category');
+ const pb=t.closest('.page-button'),st=t.closest('.section-tab'),nh=t.closest('.notebook-head'),pagesCol=t.closest('.nav-pages');
+ const half=(node)=>{const r=node.getBoundingClientRect();return e.clientY<r.top+r.height/2?'drop-before':'drop-after';};
  if(dragging.type==='page'){
-  if(pb){if(pb.dataset.pageId===dragging.id)return null;const r=pb.getBoundingClientRect();return {mark:pb,cls:e.clientY<r.top+r.height/2?'drop-before':'drop-after',pageId:pb.dataset.pageId,category:grp.dataset.category};}
-  if(grp)return {mark:grp,cls:'drop-into',category:grp.dataset.category};
+  if(pb){if(pb.dataset.pageId===dragging.id)return null;return {mark:pb,cls:half(pb),pageId:pb.dataset.pageId,sectionId:pageById(pb.dataset.pageId)?.sectionId};}
+  if(st)return {mark:st,cls:'drop-into',sectionId:st.dataset.sectionId};
+  if(pagesCol)return {mark:pagesCol,cls:'drop-into',sectionId:currentSection().id};
   return null;
  }
- if(!grp||!grp.dataset.category||grp.dataset.category===dragging.name)return null;
- const r=grp.getBoundingClientRect();
- return {mark:ch||grp.querySelector('.category-heading'),cls:e.clientY<r.top+r.height/2?'drop-before':'drop-after',category:grp.dataset.category};
+ if(dragging.type==='section'){
+  if(st){if(st.dataset.sectionId===dragging.id)return null;const sec=sectionOf(doc,st.dataset.sectionId);return {mark:st,cls:half(st),sectionId:sec.id,notebookId:sec.notebookId};}
+  if(nh){const nb=nh.closest('.notebook');return {mark:nh,cls:'drop-into',notebookId:nb.dataset.notebookId};}
+  return null;
+ }
+ if(dragging.type==='notebook'){
+  if(nh){const nb=nh.closest('.notebook');if(nb.dataset.notebookId===dragging.id)return null;return {mark:nh,cls:half(nh),notebookId:nb.dataset.notebookId};}
+  return null;
+ }
+ return null;
 }
-pagesEl.addEventListener('dragstart',e=>{
- const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),ch=t?.closest('.category-heading');
+navEl.addEventListener('dragstart',e=>{
+ const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),st=t?.closest('.section-tab'),nb=t?.closest('.notebook-button');
  if(pb){dragging={type:'page',id:pb.dataset.pageId};pb.classList.add('dragging');}
- else if(ch&&ch.dataset.category){dragging={type:'category',name:ch.dataset.category};ch.classList.add('dragging');}
+ else if(st){dragging={type:'section',id:st.dataset.sectionId};st.classList.add('dragging');}
+ else if(nb){dragging={type:'notebook',id:nb.dataset.notebookId};nb.classList.add('dragging');}
  else{e.preventDefault();return;}
  e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',dragging.type);}catch{}
 });
-pagesEl.addEventListener('dragend',()=>{dragging=null;clearDropMarks();for(const el of pagesEl.querySelectorAll('.dragging'))el.classList.remove('dragging');});
-pagesEl.addEventListener('dragover',e=>{
+navEl.addEventListener('dragend',()=>{dragging=null;clearDropMarks();for(const x of navEl.querySelectorAll('.dragging'))x.classList.remove('dragging');});
+navEl.addEventListener('dragover',e=>{
  if(!dragging)return;const t=dropTarget(e);clearDropMarks();if(!t)return;
  e.preventDefault();e.dataTransfer.dropEffect='move';t.mark.classList.add(t.cls);
 });
-pagesEl.addEventListener('dragleave',e=>{if(!pagesEl.contains(e.relatedTarget))clearDropMarks();});
-pagesEl.addEventListener('drop',e=>{
+navEl.addEventListener('dragleave',e=>{if(!navEl.contains(e.relatedTarget))clearDropMarks();});
+navEl.addEventListener('drop',e=>{
  if(!dragging)return;e.preventDefault();const t=dropTarget(e),d=dragging;dragging=null;clearDropMarks();if(!t)return;
  let moved=false;
  if(d.type==='page'){
-  if(t.cls==='drop-into')moved=movePage(doc,d.id,t.category,null);
-  else if(t.cls==='drop-before')moved=movePage(doc,d.id,t.category,t.pageId);
-  else{const list=doc.pages.filter(p=>categoryOf(p)===t.category),i=list.findIndex(p=>p.id===t.pageId);moved=movePage(doc,d.id,t.category,list[i+1]?list[i+1].id:null);}
-  if(moved)touchPages([d.id]);
-  if(moved&&d.id===doc.activeId){$('page-category').value=page().category||'';breadcrumb();}
+  if(t.cls==='drop-into')moved=movePage(doc,d.id,t.sectionId,null);
+  else if(t.cls==='drop-before')moved=movePage(doc,d.id,t.sectionId,t.pageId);
+  else{const list=pagesIn(doc,t.sectionId),i=list.findIndex(pg=>pg.id===t.pageId);moved=movePage(doc,d.id,t.sectionId,list[i+1]?list[i+1].id:null);}
+  if(moved){touchPages([d.id]);if(d.id===doc.activeId){selectedSectionId=null;breadcrumb();}}
+ } else if(d.type==='section'){
+  if(t.cls==='drop-into')moved=moveSection(doc,d.id,t.notebookId,null);
+  else if(t.cls==='drop-before')moved=moveSection(doc,d.id,t.notebookId,t.sectionId);
+  else{const list=sectionsIn(doc,t.notebookId),i=list.findIndex(x=>x.id===t.sectionId);moved=moveSection(doc,d.id,t.notebookId,list[i+1]?list[i+1].id:null);}
  } else {
-  if(t.cls==='drop-before')moved=moveCategory(doc,d.name,t.category);
-  else{const i=doc.categories.indexOf(t.category);moved=moveCategory(doc,d.name,doc.categories[i+1]||null);}
+  if(t.cls==='drop-before')moved=moveNotebook(doc,d.id,t.notebookId);
+  else{const i=doc.notebooks.findIndex(x=>x.id===t.notebookId);moved=moveNotebook(doc,d.id,doc.notebooks[i+1]?doc.notebooks[i+1].id:null);}
  }
  if(moved){changed();renderPages();}
 });
-// ---- add category ----
-$('add-category').onclick=()=>showForm({kind:'new-category'},'新しいカテゴリ','','作成');
+// ---- forms: new page / section / notebook, renames ----
+$('add-notebook').onclick=()=>showForm({kind:'new-notebook'},'新しいノートブック','','作成');
 $('new-category-cancel').onclick=()=>{$('new-category').hidden=true;formMode=null;};
+function createPageIn(sectionId,title) {
+ if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return null;}
+ finish();const p=newPage(title,sectionId);doc.pages.push(p);doc.activeId=p.id;selectedSectionId=null;showPage();changed();return p;
+}
 $('new-category').onsubmit=e=>{
- e.preventDefault();const mode=formMode||{kind:'new-category'};
+ e.preventDefault();const mode=formMode||{kind:'new-page'};const value=$('new-category-name').value.trim();
+ const close=()=>{$('new-category').hidden=true;formMode=null;};
  if(mode.kind==='rename-page'){
-  const p=pageById(mode.id),title=$('new-category-name').value.trim()||DEFAULT_NAME;if(!p)return;
-  p.title=title;$('new-category').hidden=true;formMode=null;
-  if(p===page()){$('page-title').value=title;breadcrumb();}changed(p);renderPages();return;
+  const p=pageById(mode.id);if(!p)return;p.title=value||DEFAULT_NAME;close();
+  if(p===page()){$('page-title').value=p.title;breadcrumb();}changed(p);renderPages();return;
  }
- if(mode.kind==='rename-category'){
-  const wanted=$('new-category-name').value.trim()||uniqueCategoryName();
-  const next=renameCategory(doc,mode.name,wanted);if(!next)return;
-  touchPages(doc.pages.filter(pg=>categoryOf(pg)===next).map(pg=>pg.id));
-  $('new-category').hidden=true;formMode=null;collapsed.delete(next);
-  $('page-category').value=page().category||'';breadcrumb();changed();renderPages();return;
+ if(mode.kind==='rename-section'){
+  const sec=sectionOf(doc,mode.id);if(!sec)return;
+  renameSection(doc,mode.id,value||uniqueIn(sectionsIn(doc,sec.notebookId).map(x=>x.name)));close();changed();breadcrumb();renderPages();return;
  }
- if(mode.kind==='new-page'){
-  const title=$('new-category-name').value.trim()||DEFAULT_NAME;
-  if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return;}
-  $('new-category').hidden=true;formMode=null;finish();
-  const p=newPage(title,categoryOf(page()));doc.pages.push(p);doc.activeId=p.id;showPage();changed();return;
+ if(mode.kind==='rename-notebook'){
+  renameNotebook(doc,mode.id,value||uniqueIn(doc.notebooks.map(x=>x.name)));close();changed();breadcrumb();renderPages();return;
  }
- const name=addCategory(doc,$('new-category-name').value.trim()||uniqueCategoryName());
- if(!name)return;formMode=null;
- $('new-category').hidden=true;collapsed.delete(name);
- if(doc.pages.some(p=>categoryOf(p)===name)){openPage(doc.pages.find(p=>categoryOf(p)===name).id);message('「'+name+'」はすでにあります。そのカテゴリのページを開きました。');renderPages();return;}
- if(doc.pages.length>=500){message('試作品では500ページまで作れます。');changed();renderPages();return;}
- finish();const p=newPage(DEFAULT_NAME,name);doc.pages.push(p);doc.activeId=p.id;showPage();changed();
- $('page-title').focus();$('page-title').select();
+ if(mode.kind==='new-section'){
+  const nbId=notebookOf(doc,mode.notebookId)?mode.notebookId:doc.notebooks[0].id;
+  const sec=addSection(doc,nbId,value||uniqueIn(sectionsIn(doc,nbId).map(x=>x.name)));if(!sec)return;close();collapsedNotebooks.delete(nbId);
+  createPageIn(sec.id,DEFAULT_NAME);return;
+ }
+ if(mode.kind==='new-notebook'){
+  const nb=addNotebook(doc,value||uniqueIn(doc.notebooks.map(x=>x.name)));close();
+  const sec=addSection(doc,nb.id,'新しいセクション 1');createPageIn(sec.id,DEFAULT_NAME);return;
+ }
+ // new page in the section shown in the page column
+ close();createPageIn(currentSection().id,value||DEFAULT_NAME);
 };
-function breadcrumb(){const p=page(),c=categoryOf(p);$('breadcrumb').textContent=(c?c+' / ':'')+(p.title||'名称未設定');}
+
+function breadcrumb(){const p=page(),sec=sectionOf(doc,p.sectionId),nb=sec&&notebookOf(doc,sec.notebookId);$('breadcrumb').textContent=(nb?nb.name+' › ':'')+(sec?sec.name+' › ':'')+(p.title||'名称未設定');}
 function showPage() {
  activeBlock=null;editing=null;selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;ensureLayers(page());
  if(document.activeElement&&sheet.contains(document.activeElement))document.activeElement.blur();
- $('page-title').value=page().title;$('page-category').value=page().category||'';
+ $('page-title').value=page().title;
  breadcrumb();renderPages();renderPage();renderLayers();syncHistory();
 }
 // ---- page geometry ----
@@ -1053,8 +1119,6 @@ document.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>setColor(b.dataset
 $('color').oninput=e=>setColor(e.target.value);
 $('width').oninput=e=>{width=Number(e.target.value);$('width-value').value=width;};
 $('page-title').oninput=e=>{page().title=e.target.value;breadcrumb();changed();renderPages();};
-$('page-category').oninput=e=>{page().category=e.target.value;breadcrumb();changed();};
-$('page-category').onchange=e=>{const v=e.target.value.trim();e.target.value=v;page().category=v;if(v)addCategory(doc,v);changed();renderPages();};
 function growAndReveal() {
  finish();const p=page(),before=snapshot(p),prev=p.height;
  if(!growPage(p,p.height+400)){message('このページは上限（'+MAX_HEIGHT+'）まで広がっています。左の「ページを追加」で次のページを作ってください。');return;}
@@ -1067,7 +1131,7 @@ function growAndReveal() {
 $('grow-page').onclick=growAndReveal;
 $('add-page').onclick=()=>{
  if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return;}
- const c=categoryOf(page());showForm({kind:'new-page'},'新しいページ'+(c?'（'+c+'）':''),'','作成');
+ const sec=currentSection();showForm({kind:'new-page'},'新しいページ（'+sec.name+'）','','作成');
 };
 function download(content,name,type='application/json') {
  const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');
@@ -1088,14 +1152,14 @@ $('import-file').onchange=async e=>{
   if(file.size>200*1024*1024)throw new Error('200MB以下のバックアップを選んでください。');
   const incoming=upgradeNotebook(JSON.parse(await file.text()));finish();
   const draft=structuredClone(doc),r=mergeNotebook(draft,incoming);
-  doc=validateBackup(draft);histories.clear();dirtyAll=true;showPage();changed();
+  doc=validateBackup(draft);histories.clear();dirtyAll=true;selectedSectionId=null;showPage();changed();
   message('取り込みました：新しいページ '+r.added+'、更新 '+r.updated+'、変更なし '+r.unchanged+(r.skipped?'、ゴミ箱にあるため戻さなかったページ '+r.skipped:'')+'。同じページは日時の新しい方を残しています。');
  }catch(error){message('読み込めませんでした。元のメモは変更していません。 '+error.message);}
 };
 // ---- cloud sync (see sync.mjs) ----
 let syncEngine=null,syncTransport=null,applyingRemote=false,syncUser=null,syncObserved=null;
 const $sync=id=>$('sync-'+id);
-function syncSignature(){return JSON.stringify([doc.categories||[],doc.pages.map(p=>p.id)]);}
+function syncSignature(){return JSON.stringify([doc.notebooks||[],doc.sections||[],doc.pages.map(p=>p.id)]);}
 function syncSnapshot(){syncObserved={pages:new Set(doc.pages.map(p=>p.id)),trash:new Set((doc.trash||[]).map(t=>t.id)),sig:syncSignature()};}
 // After any local change: pages that appeared/disappeared, trash entries that appeared/disappeared,
 // and layout changes are queued for upload. The changed page itself is marked by changed().
@@ -1133,7 +1197,7 @@ function applyRemotePage(id,pg) {
   } else {
    ensureLayers(pg);if(i>=0)doc.pages[i]=pg;else doc.pages.push(pg);histories.delete(id);dirtyPages.add(id);
   }
-  normalizeCategories(doc);revision++;dirty=true;
+  ensureStructure(doc);revision++;dirty=true;
   if(!pg||id===doc.activeId)showPage();else renderPages();
   save();
  }finally{applyingRemote=false;syncSnapshot();}
@@ -1147,7 +1211,7 @@ function applyRemoteTrash(id,entry) {
    const ids=new Set(entry.pages.map(pg=>pg.id));
    if(doc.pages.some(pg=>ids.has(pg.id))){doc.pages=doc.pages.filter(pg=>!ids.has(pg.id));if(!doc.pages.length)doc.pages.push(newPage('はじめのページ'));if(!doc.pages.some(pg=>pg.id===doc.activeId))doc.activeId=doc.pages[0].id;}
   }
-  normalizeCategories(doc);revision++;dirty=true;showPage();save();
+  ensureStructure(doc);revision++;dirty=true;showPage();save();
  }finally{applyingRemote=false;syncSnapshot();}
 }
 function applyRemoteNotebook(meta) {
@@ -1156,8 +1220,11 @@ function applyRemoteNotebook(meta) {
   const order=Array.isArray(meta.order)?meta.order:[],byId=new Map(doc.pages.map(pg=>[pg.id,pg]));
   const ordered=order.map(id=>byId.get(id)).filter(Boolean);for(const pg of doc.pages)if(!order.includes(pg.id))ordered.push(pg);
   doc.pages=ordered;
-  if(Array.isArray(meta.categories))doc.categories=meta.categories.filter(c=>typeof c==='string'&&c.trim()&&c.length<=60);
-  normalizeCategories(doc);doc.metaUpdatedAt=meta.updatedAt||Date.now();revision++;dirty=true;renderPages();save();
+  // notebooks/sections: remote wins per id, local-only ones are kept (they may still be waiting for upload)
+  const hex=/^#[0-9a-f]{6}$/i;
+  if(Array.isArray(meta.notebooks)){const remote=meta.notebooks.filter(n=>n&&typeof n.id==='string'&&typeof n.name==='string'&&n.name.trim()&&hex.test(n.color||''));const ids=new Set(remote.map(n=>n.id));doc.notebooks=[...remote.map(n=>({id:n.id,name:n.name.slice(0,60),color:n.color.toLowerCase()})),...(doc.notebooks||[]).filter(n=>!ids.has(n.id))];}
+  if(Array.isArray(meta.sections)){const remote=meta.sections.filter(x=>x&&typeof x.id==='string'&&typeof x.notebookId==='string'&&typeof x.name==='string'&&x.name.trim()&&hex.test(x.color||''));const ids=new Set(remote.map(x=>x.id));doc.sections=[...remote.map(x=>({id:x.id,notebookId:x.notebookId,name:x.name.slice(0,60),color:x.color.toLowerCase()})),...(doc.sections||[]).filter(x=>!ids.has(x.id))];}
+  ensureStructure(doc);doc.metaUpdatedAt=meta.updatedAt||Date.now();revision++;dirty=true;breadcrumb();renderPages();save();
  }finally{applyingRemote=false;syncSnapshot();}
 }
 async function syncBoot() {
@@ -1236,10 +1303,10 @@ async function start() {
   }
   else if(saved)doc=validateBackup(saved);
   else{const p=newPage('はじめのページ');doc={version:2,pages:[p],activeId:p.id};}
-  let filled=false;for(const p of doc.pages)if(ensureLayers(p))filled=true;
+  let filled=ensureStructure(doc);for(const p of doc.pages)if(ensureLayers(p))filled=true;
   lastSaved={pages:new Set(doc.pages.map(pg=>pg.id)),trash:new Set((doc.trash||[]).map(t=>t.id))};
   if(filled)dirtyAll=true;
-  ready=true;document.querySelectorAll('button,input,textarea').forEach(el=>el.disabled=false);
+  ready=true;document.querySelectorAll('button,input,textarea,select').forEach(el=>el.disabled=false);
   lastPaperWidth=paper.clientWidth;showPage();chooseTool('text');
   if(filled){revision++;dirty=true;save();}
   if(saved&&saved.version!==1)setStatus('保存済み');else changed();

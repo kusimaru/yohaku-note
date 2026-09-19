@@ -6,7 +6,7 @@
 //   users/{uid}/pages/{pageId}   {updatedAt, title, category, deleted, chunks, rev}
 //   users/{uid}/pages/{pageId}/parts/{n}   {d: base64 chunk}
 //   users/{uid}/trash/{entryId}  (same shape)
-//   users/{uid}/meta/notebook    {categories, order, updatedAt}
+//   users/{uid}/meta/notebook    {notebooks, sections, order, updatedAt}
 // A page is JSON → UTF-8 → base64, split into chunks below Firestore's 1 MiB document limit.
 
 export const SDK_VERSION='10.14.1';
@@ -150,7 +150,7 @@ export function createSyncEngine(transport,host) {
      if(e)await transport.write(uid,'trash',id,e,{updatedAt:e.deletedAt||Date.now(),name:e.name||''});
      else await transport.remove(uid,'trash',id,Date.now());
     } else if(kind==='notebook'){
-     await transport.writeMeta(uid,{categories:doc.categories||[],order:doc.pages.map(p=>p.id),updatedAt:doc.metaUpdatedAt||Date.now()});
+     await transport.writeMeta(uid,{notebooks:doc.notebooks||[],sections:doc.sections||[],order:doc.pages.map(p=>p.id),updatedAt:doc.metaUpdatedAt||Date.now()});
     }
     pending.delete(key);persist();lastWriteMs=Math.round(performance.now()-t0);
    }

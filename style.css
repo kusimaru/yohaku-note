@@ -460,3 +460,9 @@ body.ios .sheet.select .block{touch-action:none}
 .sync-status.warn{color:#8a6b1f}.sync-status.err{color:#a2363b}.sync-status.off{color:#8a948b}
 
 #view-quality{margin-right:8px}
+
+/* Fingers scroll and pinch-zoom even in pen/eraser/select mode; only while a pen is near the
+   screen (hover or contact) is touch handling switched off so the pen never pans the page. */
+.sheet.ink,.sheet.select{touch-action:pan-x pan-y pinch-zoom}
+.sheet.ink.pen-near,.sheet.select.pen-near{touch-action:none}
+.sheet.select .block{touch-action:none}

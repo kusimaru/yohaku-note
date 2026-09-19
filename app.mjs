@@ -666,6 +666,16 @@ window.addEventListener('drop',e=>{
 });
 // ---- pointer handling on the sheet ----
 sheet.tabIndex=-1;
+// Pen proximity: while a pen hovers over or touches the page, mark the sheet so CSS turns off
+// touch panning (a pen must draw, not scroll). Fingers get scrolling back 1.2 s after the pen leaves.
+let penNearTimer=0;
+function penNear(e) {
+ if(e.pointerType!=='pen')return;
+ if(!sheet.classList.contains('pen-near'))sheet.classList.add('pen-near');
+ clearTimeout(penNearTimer);penNearTimer=setTimeout(()=>sheet.classList.remove('pen-near'),1200);
+}
+for(const ev of ['pointerover','pointerenter','pointermove','pointerdown'])sheet.addEventListener(ev,penNear,{capture:true,passive:true});
+sheet.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'){clearTimeout(penNearTimer);penNearTimer=setTimeout(()=>sheet.classList.remove('pen-near'),400);}});
 sheet.addEventListener('pointerdown',e=>{
  if(!ready)return;
  if(gesture){if(gesture.id===e.pointerId)return;finish();}

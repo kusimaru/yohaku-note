@@ -53,8 +53,9 @@ export async function createFirebaseTransport(config=FIREBASE_CONFIG) {
  const [{initializeApp},A,F]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
  const app=initializeApp(config),auth=A.getAuth(app);
  let db;
- try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache({tabManager:F.persistentMultipleTabManager()})});}
+ try{db=F.initializeFirestore(app,{localCache:F.memoryLocalCache()});}
  catch{db=F.getFirestore(app);}
+ const chunkCounts=new Map(); // id -> chunks written this session (to skip needless clean-up reads)
  const ref=(uid,c,id)=>F.doc(db,'users',uid,c,id),parts=(uid,c,id)=>F.collection(db,'users',uid,c,id,'parts');
  return {
   kind:'firebase',
@@ -68,13 +69,17 @@ export async function createFirebaseTransport(config=FIREBASE_CONFIG) {
    batch.set(ref(uid,c,id),{...meta,deleted:false,chunks:chunks.length,rev:meta.updatedAt});
    chunks.forEach((d,i)=>batch.set(F.doc(parts(uid,c,id),String(i)),{d}));
    await batch.commit();
-   // drop stale parts left by a previous, larger version
-   const old=await F.getDocs(parts(uid,c,id));const extra=[];old.forEach(d=>{if(Number(d.id)>=chunks.length)extra.push(d.ref);});
-   if(extra.length){const b2=F.writeBatch(db);extra.forEach(r=>b2.delete(r));await b2.commit();}
+   // drop stale parts left by a previous, larger version (only when the count may have shrunk)
+   const known=chunkCounts.get(c+'/'+id);
+   if(known===undefined||known>chunks.length){
+    const old=await F.getDocs(parts(uid,c,id));const extra=[];old.forEach(d=>{if(Number(d.id)>=chunks.length)extra.push(d.ref);});
+    if(extra.length){const b2=F.writeBatch(db);extra.forEach(r=>b2.delete(r));await b2.commit();}
+   }
+   chunkCounts.set(c+'/'+id,chunks.length);
   },
   async remove(uid,c,id,updatedAt){
    const batch=F.writeBatch(db);batch.set(ref(uid,c,id),{deleted:true,updatedAt,chunks:0,rev:updatedAt});
-   const old=await F.getDocs(parts(uid,c,id));old.forEach(d=>batch.delete(d.ref));await batch.commit();
+   const old=await F.getDocs(parts(uid,c,id));old.forEach(d=>batch.delete(d.ref));await batch.commit();chunkCounts.set(c+'/'+id,0);
   },
   async read(uid,c,id){
    const meta=await F.getDoc(ref(uid,c,id));if(!meta.exists()||meta.data().deleted)return null;
@@ -124,15 +129,18 @@ export function createSyncEngine(transport,host) {
  const seen={pages:new Set(),trash:new Set()},firstSnapshot={pages:false,trash:false};
  const persist=()=>{try{localStorage.setItem('yohaku-sync-pending',JSON.stringify([...pending.keys()]));}catch{}};
  try{for(const k of JSON.parse(localStorage.getItem('yohaku-sync-pending')||'[]'))pending.set(k,true);}catch{}
- const schedule=(ms=1200)=>{clearTimeout(timer);timer=setTimeout(flush,ms);};
+ const schedule=(ms=1500)=>{clearTimeout(timer);timer=setTimeout(flush,ms);};
+ let lastWriteMs=0;
  function mark(kind,id=''){pending.set(kind+':'+id,true);persist();if(uid)schedule();}
  async function flush() {
   if(!uid||flushing||stopped)return;
-  if(!pending.size){host.setStatus('online');return;}
+  if(!pending.size){host.setStatus('online',{lastWriteMs});return;}
+  if(host.isBusy()){schedule(700);return;}
   flushing=true;host.setStatus('sending',pending.size);
   try{
    for(const key of [...pending.keys()]){
-    const i=key.indexOf(':'),kind=key.slice(0,i),id=key.slice(i+1),doc=host.getDoc();
+    if(host.isBusy()){schedule(700);break;}
+    const i=key.indexOf(':'),kind=key.slice(0,i),id=key.slice(i+1),doc=host.getDoc();const t0=performance.now();
     if(kind==='page'){
      const p=doc.pages.find(x=>x.id===id);
      if(p)await transport.write(uid,'pages',id,p,{updatedAt:p.updatedAt||Date.now(),title:p.title||'',category:p.category||''});
@@ -144,9 +152,9 @@ export function createSyncEngine(transport,host) {
     } else if(kind==='notebook'){
      await transport.writeMeta(uid,{categories:doc.categories||[],order:doc.pages.map(p=>p.id),updatedAt:doc.metaUpdatedAt||Date.now()});
     }
-    pending.delete(key);persist();
+    pending.delete(key);persist();lastWriteMs=Math.round(performance.now()-t0);
    }
-   host.setStatus('online');
+   if(!pending.size)host.setStatus('online',{lastWriteMs});
   }catch(e){host.setStatus(navigator.onLine?'error':'offline',pending.size,e);schedule(15000);}
   finally{flushing=false;if(pending.size&&!timer)schedule();}
  }
@@ -160,6 +168,10 @@ export function createSyncEngine(transport,host) {
     try{
      const got=await transport.read(uid,job.c,job.id);
      if(!got)continue;
+     // re-check after the network round trip: the user may have edited this item meanwhile
+     const doc=host.getDoc(),list=job.c==='pages'?doc.pages:(doc.trash||[]),cur=list.find(x=>x.id===job.id);
+     const curStamp=cur?(job.c==='pages'?(cur.updatedAt||0):(cur.deletedAt||0)):-1;
+     if(pending.has((job.c==='pages'?'page:':'trash:')+job.id)||curStamp>=(got.updatedAt||0))continue;
      if(job.c==='pages'){const page=got.obj;if(page&&page.id===job.id&&host.validatePage(page))host.applyPage(job.id,page);}
      else {const entry=got.obj;if(entry&&entry.id===job.id&&host.validateTrash(entry))host.applyTrash(job.id,entry);}
     }catch(e){console.warn('sync read failed',job.c,job.id,e);readQueue.push(job);await new Promise(r=>setTimeout(r,3000));if(readQueue.length===1&&readQueue[0]===job){break;}}

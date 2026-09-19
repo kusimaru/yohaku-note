@@ -266,13 +266,35 @@ function layout() {
  if(!doc)return;
  const p=page();scale=paper.clientWidth/W||1;
  sheet.style.setProperty('--ui-inverse-scale',1/scale);sheet.style.height=p.height+'px';sheet.style.transform='scale('+scale+')';lassoEl.setAttribute('height',p.height);
- paper.style.height=Math.round(p.height*scale)+'px';canvas.style.height=p.height+'px';
- const dpr=Math.min(devicePixelRatio||1,3);
- canvas.width=Math.max(1,Math.round(W*scale*dpr));canvas.height=Math.max(1,Math.round(p.height*scale*dpr));
- ctx.setTransform(canvas.width/W,0,0,canvas.height/p.height,0,0);
+ paper.style.height=Math.round(p.height*scale)+'px';
  $('page-size').textContent='ページの高さ '+p.height+' / 最大 '+MAX_HEIGHT;$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;
+ updateViewportCanvas(true);
+}
+// The ink canvas covers only the part of the page that is on screen (plus a margin), not the
+// whole page. A page-sized canvas at high DPI (e.g. 2400 x 12000 px on a Surface at 200 %) is
+// too large for GPU rasterisation and every pen segment then repaints the whole bitmap, which
+// showed up as a 2-3 second pen lag. Coordinates stay in page space via the canvas transform.
+const VIEW_MARGIN=300,MAX_CANVAS_PIXELS=8e6;
+let inkView={top:0,bottom:0,k:1},viewRaf=0;
+function viewportRange() {
+ const rect=sheet.getBoundingClientRect(),p=page();
+ const vt=Math.max(0,Math.floor(-rect.top/scale)),vb=Math.min(p.height,Math.ceil((innerHeight-rect.top)/scale));
+ return [Math.min(vt,Math.max(0,p.height-1)),Math.max(vt+1,vb)];
+}
+function updateViewportCanvas(force=false) {
+ if(!doc)return;const p=page();const [vt,vb]=viewportRange();
+ if(!force&&vt>=inkView.top&&vb<=inkView.bottom)return;
+ const top=Math.max(0,vt-VIEW_MARGIN),bottom=Math.min(p.height,vb+VIEW_MARGIN),h=Math.max(1,bottom-top);
+ let k=scale*Math.min(devicePixelRatio||1,3);const pixels=W*k*h*k;if(pixels>MAX_CANVAS_PIXELS)k*=Math.sqrt(MAX_CANVAS_PIXELS/pixels);
+ inkView={top,bottom,k};
+ canvas.style.top=top+'px';canvas.style.height=h+'px';
+ canvas.width=Math.max(1,Math.round(W*k));canvas.height=Math.max(1,Math.round(h*k));
+ ctx.setTransform(k,0,0,k,0,-top*k);
  redraw();
 }
+const onViewportScroll=()=>{if(viewRaf)return;viewRaf=requestAnimationFrame(()=>{viewRaf=0;updateViewportCanvas();});};
+window.addEventListener('scroll',onViewportScroll,{passive:true});window.addEventListener('resize',onViewportScroll);
+document.getElementById('paper-viewport')?.addEventListener('scroll',onViewportScroll,{passive:true});
 new ResizeObserver(()=>{if(paper.clientWidth!==lastPaperWidth){lastPaperWidth=paper.clientWidth;layout();}}).observe(paper);
 function coordinates(e) {
  const rect=sheet.getBoundingClientRect();
@@ -290,8 +312,16 @@ function segment(a,b,s,g=ctx) {
  g.strokeStyle=s.color;g.lineWidth=(wa+wb)/2;g.lineCap='round';g.lineJoin='round';
  g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);g.stroke();dot(b,wb/2,s.color,g);
 }
+const yRangeCache=new WeakMap();
+function strokeYRange(s) {
+ let r=yRangeCache.get(s);
+ if(!r||r[2]!==s.points.length){let y0=Infinity,y1=-Infinity;for(const pt of s.points){if(pt[1]<y0)y0=pt[1];if(pt[1]>y1)y1=pt[1];}r=[y0-s.width*2,y1+s.width*2,s.points.length];yRangeCache.set(s,r);}
+ return r;
+}
 function drawStrokes(g,strokes) {
- for(const s of strokes){dot(s.points[0],inkWidth(s.width,s.points[0][2],s.pressure)/2,s.color,g);
+ for(const s of strokes){
+  const [y0,y1]=strokeYRange(s);if(y1<inkView.top||y0>inkView.bottom)continue;
+  dot(s.points[0],inkWidth(s.width,s.points[0][2],s.pressure)/2,s.color,g);
   for(let i=1;i<s.points.length;i++)segment(s.points[i-1],s.points[i],s,g);
  }
 }
@@ -304,7 +334,7 @@ function redraw() {
   if(!L.visible)continue;const strokes=p.strokes.filter(s=>s.layer===L.id);if(!strokes.length)continue;
   if(L.opacity>=1){drawStrokes(ctx,strokes);continue;}
   if(off.width!==canvas.width||off.height!==canvas.height){off.width=canvas.width;off.height=canvas.height;}
-  octx.setTransform(1,0,0,1,0,0);octx.clearRect(0,0,off.width,off.height);octx.setTransform(canvas.width/W,0,0,canvas.height/p.height,0,0);
+  octx.setTransform(1,0,0,1,0,0);octx.clearRect(0,0,off.width,off.height);octx.setTransform(inkView.k,0,0,inkView.k,0,-inkView.top*inkView.k);
   drawStrokes(octx,strokes);
   ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=L.opacity;ctx.drawImage(off,0,0);ctx.restore();
  }
@@ -989,7 +1019,7 @@ function syncSetStatus(state,detail,error) {
  const [label,cls,badgeText,badgeCls]=map[state]||map.off;
  el.hidden=state==='off';el.className='sync-status '+cls;text.textContent=label;badge.textContent=badgeText;badge.className='sync-badge '+badgeCls;
  if(state==='error'&&error){$sync('detail').textContent='エラー: '+(error.code||error.message||error);console.warn('sync',error);}
- else if(state==='online')$sync('detail').textContent='この端末とクラウドは同じ状態です。';
+ else if(state==='online')$sync('detail').textContent='この端末とクラウドは同じ状態です。'+(detail&&detail.lastWriteMs?'（最後の送信 '+(detail.lastWriteMs/1000).toFixed(1)+' 秒）':'');
  else if(state==='offline')$sync('detail').textContent='つながったときに自動で送ります（未送信 '+(detail||0)+'）。';
 }
 function syncMessage(text){const el=$sync('message');el.textContent=text;el.hidden=!text;}

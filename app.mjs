@@ -585,7 +585,8 @@ window.addEventListener('drop',e=>{
 // ---- pointer handling on the sheet ----
 sheet.tabIndex=-1;
 sheet.addEventListener('pointerdown',e=>{
- if(!ready||gesture)return;
+ if(!ready)return;
+ if(gesture){if(gesture.id===e.pointerId)return;finish();}
  const t=e.target instanceof Element?e.target:null;
  const grip=t?.closest('.grip'),resize=t?.closest('.resize'),blockEl=t?.closest('.block');
  if(blockEl&&tool==='text')setActive(blockEl.dataset.id);
@@ -698,6 +699,20 @@ function finish() {
 }
 sheet.addEventListener('pointerleave',()=>{eraserCursor.hidden=true;});
 for(const event of ['pointerup','pointercancel','lostpointercapture'])sheet.addEventListener(event,e=>{if(gesture&&e.pointerId===gesture.id)finish();});
+// iPad Safari: pointer events alone are not enough. A stylus touch that is not
+// default-prevented can be taken over by page scrolling or Scribble, and the
+// stroke is cancelled. Touch listeners are non-passive so preventDefault works.
+const stylusTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType==='stylus');
+const activeGesture=()=>gesture&&['ink','lasso','marquee','drag','move','resize'].includes(gesture.type);
+sheet.addEventListener('touchstart',e=>{
+ if(!ready||document.body.classList.contains('reading'))return;
+ const inkTool=tool==='pen'||tool==='eraser'||tool==='select'||(tool==='text'&&$('auto-pen').checked);
+ if((stylusTouch(e)&&inkTool)||activeGesture())e.preventDefault();
+},{passive:false});
+sheet.addEventListener('touchmove',e=>{if(activeGesture())e.preventDefault();},{passive:false});
+for(const event of ['touchend','touchcancel'])sheet.addEventListener(event,e=>{
+ if(gesture&&stylusTouch(e)&&e.touches.length===0){const id=gesture.id;setTimeout(()=>{if(gesture&&gesture.id===id)finish();},80);}
+});
 window.addEventListener('blur',finish);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){finish();save();}});
 window.addEventListener('beforeunload',e=>{finish();if(dirty||saving){e.preventDefault();e.returnValue='';}});

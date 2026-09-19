@@ -144,6 +144,8 @@ input[type=checkbox]{accent-color:#416d5f}
 .paper{position:relative;background:white;border:1px solid #e1e6de;border-radius:9px;overflow:hidden;box-shadow:0 8px 30px #203b2906;min-height:200px}
 .sheet{position:absolute;left:0;top:0;width:1200px;height:1200px;transform-origin:0 0;background-image:radial-gradient(#dce5dc .8px,transparent .8px);background-size:24px 24px;cursor:text;touch-action:pan-y pinch-zoom}
 .sheet:focus{outline:none}
+.sheet{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.block .editor{-webkit-user-select:text;user-select:text}
 .sheet.ink{cursor:none;touch-action:none}
 .sheet.erase{cursor:none}
 .sheet.select{cursor:default;touch-action:none}

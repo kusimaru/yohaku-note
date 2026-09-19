@@ -1,7 +1,8 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, categoryOf, normalizeCategories, addCategory, removeCategory, movePage, moveCategory, renameCategory, deletePage, deleteCategory, restoreTrash, purgeTrash, emptyTrash } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, categoryOf, normalizeCategories, addCategory, removeCategory, movePage, moveCategory, renameCategory, deletePage, deleteCategory, restoreTrash, purgeTrash, emptyTrash, mergeNotebook } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
+import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
 import { normalizeRuns, runsToText, blockRuns, DEFAULT_TEXT_COLOR, MIN_FONT, MAX_FONT, MAX_LAYERS, ensureLayers, activeLayerOf, addLayer, removeLayer, updateLayer, moveLayer } from './model.mjs';
 const off=document.createElement('canvas'),octx=off.getContext('2d');
 const lastRuns=new WeakMap();
@@ -31,6 +32,7 @@ function setStatus(text,error=false){$('save-status').replaceChildren(...(text==
 function changed(p=page()) {
  p.updatedAt=Date.now();revision++;dirty=true;
  setStatus('保存中…');save();
+ if(syncEngine&&!applyingRemote){syncEngine.markPage(p.id);syncObserve();}
 }
 async function save() {
  if(saving||!db||!dirty)return;
@@ -958,12 +960,130 @@ $('import-file').onchange=async e=>{
  try{
   if(file.size>200*1024*1024)throw new Error('200MB以下のバックアップを選んでください。');
   const incoming=upgradeNotebook(JSON.parse(await file.text()));finish();
-  const added=incoming.pages.map(p=>({...p,id:crypto.randomUUID()}));
-  const categories=[...(doc.categories||[]),...(incoming.categories||[]).filter(c=>!(doc.categories||[]).includes(c))];
-  const merged=validateBackup({...doc,categories,pages:[...doc.pages,...added],activeId:added[0].id});
-  doc=merged;for(const p of doc.pages)ensureLayers(p);showPage();changed();
-  message(added.length+'ページを追加しました。元のページも残っています。');
+  const draft=structuredClone(doc),r=mergeNotebook(draft,incoming);
+  doc=validateBackup(draft);histories.clear();showPage();changed();
+  message('取り込みました：新しいページ '+r.added+'、更新 '+r.updated+'、変更なし '+r.unchanged+(r.skipped?'、ゴミ箱にあるため戻さなかったページ '+r.skipped:'')+'。同じページは日時の新しい方を残しています。');
  }catch(error){message('読み込めませんでした。元のメモは変更していません。 '+error.message);}
+};
+// ---- cloud sync (see sync.mjs) ----
+let syncEngine=null,syncTransport=null,applyingRemote=false,syncUser=null,syncObserved=null;
+const $sync=id=>$('sync-'+id);
+function syncSignature(){return JSON.stringify([doc.categories||[],doc.pages.map(p=>p.id)]);}
+function syncSnapshot(){syncObserved={pages:new Set(doc.pages.map(p=>p.id)),trash:new Set((doc.trash||[]).map(t=>t.id)),sig:syncSignature()};}
+// After any local change: pages that appeared/disappeared, trash entries that appeared/disappeared,
+// and layout changes are queued for upload. The changed page itself is marked by changed().
+function syncObserve() {
+ if(!syncEngine||!syncObserved)return;
+ const pages=new Set(doc.pages.map(p=>p.id)),trash=new Set((doc.trash||[]).map(t=>t.id));
+ for(const id of pages)if(!syncObserved.pages.has(id))syncEngine.markPage(id);
+ for(const id of syncObserved.pages)if(!pages.has(id))syncEngine.removePage(id);
+ for(const id of trash)if(!syncObserved.trash.has(id))syncEngine.markTrash(id);
+ for(const id of syncObserved.trash)if(!trash.has(id))syncEngine.removeTrash(id);
+ const sig=syncSignature();
+ if(sig!==syncObserved.sig){doc.metaUpdatedAt=Date.now();syncEngine.markNotebook();}
+ syncObserved={pages,trash,sig};
+}
+function syncSetStatus(state,detail,error) {
+ const el=$('sync-status'),text=$('sync-status-text'),badge=$('sync-badge');
+ const map={off:['同期オフ','off','オフ',''],connecting:['接続中…','warn','接続中','warn'],online:['同期済み','','オン','on'],sending:['送信中 '+(detail||''),'warn','送信中','warn'],offline:['オフライン（後で送信）','warn','オフライン','warn'],error:['同期エラー','err','エラー','err']};
+ const [label,cls,badgeText,badgeCls]=map[state]||map.off;
+ el.hidden=state==='off';el.className='sync-status '+cls;text.textContent=label;badge.textContent=badgeText;badge.className='sync-badge '+badgeCls;
+ if(state==='error'&&error){$sync('detail').textContent='エラー: '+(error.code||error.message||error);console.warn('sync',error);}
+ else if(state==='online')$sync('detail').textContent='この端末とクラウドは同じ状態です。';
+ else if(state==='offline')$sync('detail').textContent='つながったときに自動で送ります（未送信 '+(detail||0)+'）。';
+}
+function syncMessage(text){const el=$sync('message');el.textContent=text;el.hidden=!text;}
+function validateRemotePage(pg){try{validateBackup({version:2,pages:[pg],activeId:pg.id});return true;}catch(e){console.warn('remote page rejected',e);return false;}}
+function validateRemoteTrash(entry){try{const d=newPage('x');validateBackup({version:2,pages:[d],activeId:d.id,trash:[entry]});return true;}catch(e){console.warn('remote trash rejected',e);return false;}}
+function applyRemotePage(id,pg) {
+ applyingRemote=true;
+ try{
+  const i=doc.pages.findIndex(x=>x.id===id);
+  if(!pg){
+   if(i<0)return;doc.pages.splice(i,1);histories.delete(id);
+   if(!doc.pages.length)doc.pages.push(newPage('はじめのページ'));
+   if(doc.activeId===id)doc.activeId=doc.pages[Math.min(i,doc.pages.length-1)].id;
+  } else {
+   ensureLayers(pg);if(i>=0)doc.pages[i]=pg;else doc.pages.push(pg);histories.delete(id);
+  }
+  normalizeCategories(doc);revision++;dirty=true;
+  if(!pg||id===doc.activeId)showPage();else renderPages();
+  save();
+ }finally{applyingRemote=false;syncSnapshot();}
+}
+function applyRemoteTrash(id,entry) {
+ applyingRemote=true;
+ try{
+  doc.trash=(doc.trash||[]).filter(t=>t.id!==id);
+  if(entry){
+   doc.trash.push(entry);
+   const ids=new Set(entry.pages.map(pg=>pg.id));
+   if(doc.pages.some(pg=>ids.has(pg.id))){doc.pages=doc.pages.filter(pg=>!ids.has(pg.id));if(!doc.pages.length)doc.pages.push(newPage('はじめのページ'));if(!doc.pages.some(pg=>pg.id===doc.activeId))doc.activeId=doc.pages[0].id;}
+  }
+  normalizeCategories(doc);revision++;dirty=true;showPage();save();
+ }finally{applyingRemote=false;syncSnapshot();}
+}
+function applyRemoteNotebook(meta) {
+ applyingRemote=true;
+ try{
+  const order=Array.isArray(meta.order)?meta.order:[],byId=new Map(doc.pages.map(pg=>[pg.id,pg]));
+  const ordered=order.map(id=>byId.get(id)).filter(Boolean);for(const pg of doc.pages)if(!order.includes(pg.id))ordered.push(pg);
+  doc.pages=ordered;
+  if(Array.isArray(meta.categories))doc.categories=meta.categories.filter(c=>typeof c==='string'&&c.trim()&&c.length<=60);
+  normalizeCategories(doc);doc.metaUpdatedAt=meta.updatedAt||Date.now();revision++;dirty=true;renderPages();save();
+ }finally{applyingRemote=false;syncSnapshot();}
+}
+async function syncBoot() {
+ const useFake=(()=>{try{return localStorage.getItem('yohaku-sync-fake')==='1';}catch{return false;}})();
+ const wanted=(()=>{try{return localStorage.getItem('yohaku-sync')==='on';}catch{return false;}})();
+ if(!wanted&&!useFake){syncSetStatus('off');return;}
+ await syncConnect(useFake);
+}
+async function syncConnect(useFake) {
+ if(syncTransport)return true;
+ syncSetStatus('connecting');
+ try{syncTransport=useFake?createFakeTransport():await createFirebaseTransport();}
+ catch(e){syncTransport=null;syncSetStatus(navigator.onLine?'error':'offline',0,e);syncMessage('同期の準備ができませんでした。インターネットに接続して、もう一度お試しください。');return false;}
+ syncEngine=createSyncEngine(syncTransport,{
+  getDoc:()=>doc,setStatus:syncSetStatus,applyPage:applyRemotePage,applyTrash:applyRemoteTrash,applyNotebook:applyRemoteNotebook,
+  isBusy:()=>!!gesture||!!editing||!ready,validatePage:validateRemotePage,validateTrash:validateRemoteTrash
+ });
+ syncTransport.onAuth(user=>{
+  syncUser=user;
+  $sync('signed-out').hidden=!!user;$sync('signed-in').hidden=!user;
+  if(user){
+   $sync('account').textContent=user.email+' としてログイン中';
+   try{localStorage.setItem('yohaku-sync','on');}catch{}
+   syncSnapshot();syncEngine.start(user.uid);
+  } else {
+   syncEngine.stop();syncSetStatus('off');
+  }
+ });
+ window.addEventListener('online',()=>syncEngine?.retry());
+ return true;
+}
+$sync('form').onsubmit=async e=>{
+ e.preventDefault();syncMessage('');
+ if(!(await syncConnect(false)))return;
+ try{await syncTransport.signIn($sync('email').value.trim(),$sync('password').value);syncMessage('');}
+ catch(err){syncMessage(describeAuthError(err));}
+};
+$sync('signup').onclick=async()=>{
+ syncMessage('');if(!$sync('email').value.trim()||$sync('password').value.length<6){syncMessage('メールアドレスと、6文字以上のパスワードを入れてください。');return;}
+ if(!(await syncConnect(false)))return;
+ try{await syncTransport.signUp($sync('email').value.trim(),$sync('password').value);syncMessage('登録しました。もう一方の端末でも、同じメールアドレスとパスワードでログインしてください。');}
+ catch(err){syncMessage(describeAuthError(err));}
+};
+$sync('reset').onclick=async()=>{
+ const email=$sync('email').value.trim();if(!email){syncMessage('先にメールアドレスを入れてください。');return;}
+ if(!(await syncConnect(false)))return;
+ try{await syncTransport.resetPassword(email);syncMessage('パスワード再設定のメールを送りました。届いたメールの案内に従ってください。');}catch(err){syncMessage(describeAuthError(err));}
+};
+$sync('logout').onclick=async()=>{
+ if(syncEngine&&syncEngine.pendingCount()){syncMessage('未送信の変更があります。「同期済み」になってからログアウトしてください。');return;}
+ try{localStorage.setItem('yohaku-sync','off');}catch{}
+ try{await syncTransport.signOut();}catch{}
+ syncMessage('ログアウトしました。この端末のメモはそのまま残ります。');
 };
 // Offline support + automatic update: a new version published on the server replaces the
 // old one on the next open, without the user clearing site data.
@@ -994,6 +1114,7 @@ async function start() {
   if(filled){revision++;dirty=true;save();}
   if(saved&&saved.version!==1)setStatus('保存済み');else changed();
   if('serviceWorker' in navigator)setupServiceWorker();
+  syncBoot();
  }catch(error){
   message('メモを開けませんでした。元の保存データを上書きせず停止しています。ブラウザの保存設定を確認し、再読み込みしてください。 '+error.message);
   setStatus('読み込み停止',true);

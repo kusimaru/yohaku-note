@@ -225,6 +225,25 @@ export function purgeTrash(doc,entryId) {
  doc.trash.splice(i,1);return true;
 }
 export function emptyTrash(doc){const n=(doc.trash||[]).length;doc.trash=[];return n;}
+// Merge a backup from another device: same page id → keep the newer one (by updatedAt),
+// unknown id → add, id sitting in this notebook's trash → leave in the trash. Categories and
+// trash entries are unioned. Returns counts for the user.
+export function mergeNotebook(doc,incoming) {
+ const result={added:0,updated:0,unchanged:0,skipped:0};
+ const trashIds=new Set((doc.trash||[]).flatMap(t=>t.pages.map(p=>p.id)));
+ for(const p of incoming.pages){
+  const i=doc.pages.findIndex(x=>x.id===p.id);
+  if(i>=0){if((p.updatedAt||0)>(doc.pages[i].updatedAt||0)){doc.pages[i]=p;result.updated++;}else result.unchanged++;continue;}
+  if(trashIds.has(p.id)){result.skipped++;continue;}
+  doc.pages.push(p);result.added++;
+ }
+ const cats=new Set(doc.categories||[]);doc.categories=[...(doc.categories||[]),...(incoming.categories||[]).filter(c=>!cats.has(c))];
+ const trashSeen=new Set((doc.trash||[]).map(t=>t.id));
+ doc.trash=[...(doc.trash||[]),...(incoming.trash||[]).filter(t=>!trashSeen.has(t.id)&&!t.pages.some(pg=>doc.pages.some(x=>x.id===pg.id)))];
+ normalizeCategories(doc);for(const pg of doc.pages)ensureLayers(pg);
+ if(!doc.pages.some(x=>x.id===doc.activeId))doc.activeId=doc.pages[0].id;
+ return result;
+}
 export function validateBackup(doc) {
  const bad=()=>{throw new Error('対応するノートデータではないか、試作品の上限を超えています。');};
  if(!doc||![1,2].includes(doc.version)||!Array.isArray(doc.pages)||doc.pages.length<1||doc.pages.length>500)bad();

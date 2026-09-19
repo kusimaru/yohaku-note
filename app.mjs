@@ -268,7 +268,7 @@ function layout() {
  const dpr=Math.min(devicePixelRatio||1,3);
  canvas.width=Math.max(1,Math.round(W*scale*dpr));canvas.height=Math.max(1,Math.round(p.height*scale*dpr));
  ctx.setTransform(canvas.width/W,0,0,canvas.height/p.height,0,0);
- $('page-size').textContent='ページの高さ '+p.height+' / 最大 '+MAX_HEIGHT;$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;$('fab-grow').disabled=!ready||p.height>=MAX_HEIGHT;
+ $('page-size').textContent='ページの高さ '+p.height+' / 最大 '+MAX_HEIGHT;$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;
  redraw();
 }
 new ResizeObserver(()=>{if(paper.clientWidth!==lastPaperWidth){lastPaperWidth=paper.clientWidth;layout();}}).observe(paper);
@@ -935,9 +935,7 @@ function growAndReveal() {
  window.scrollBy({top:target,behavior:'smooth'});
  message('ページを下に広げました（高さ '+p.height+' / 最大 '+MAX_HEIGHT+'）。');
 }
-$('grow-page').onclick=growAndReveal;$('fab-grow').onclick=growAndReveal;
-$('fab-bottom').onclick=()=>{const r=sheet.getBoundingClientRect();window.scrollBy({top:r.bottom-innerHeight+80,behavior:'smooth'});};
-$('fab-top').onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
+$('grow-page').onclick=growAndReveal;
 $('add-page').onclick=()=>{
  if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return;}
  const c=categoryOf(page());showForm({kind:'new-page'},'新しいページ'+(c?'（'+c+'）':''),'','作成');
@@ -967,6 +965,20 @@ $('import-file').onchange=async e=>{
   message(added.length+'ページを追加しました。元のページも残っています。');
  }catch(error){message('読み込めませんでした。元のメモは変更していません。 '+error.message);}
 };
+// Offline support + automatic update: a new version published on the server replaces the
+// old one on the next open, without the user clearing site data.
+function setupServiceWorker() {
+ let reloading=false;
+ navigator.serviceWorker.addEventListener('controllerchange',()=>{
+  if(reloading||!navigator.serviceWorker.controller)return;reloading=true;
+  if(dirty||saving){message('新しい版に更新しました。保存が終わったら再読み込みしてください。');return;}
+  location.reload();
+ });
+ navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(reg=>{
+  reg.addEventListener('updatefound',()=>{const w=reg.installing;if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)message('新しい版を読み込んでいます…');});});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)reg.update().catch(()=>{});});
+ }).catch(()=>message('オフライン起動の準備ができませんでした。通常の起動ファイルからは引き続き利用できます。'));
+}
 async function start() {
  try{
   db=await openStore();const saved=await loadNotebook(db);
@@ -981,7 +993,7 @@ async function start() {
   lastPaperWidth=paper.clientWidth;showPage();chooseTool('text');
   if(filled){revision++;dirty=true;save();}
   if(saved&&saved.version!==1)setStatus('保存済み');else changed();
-  if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>message('オフライン起動の準備ができませんでした。通常の起動ファイルからは引き続き利用できます。'));
+  if('serviceWorker' in navigator)setupServiceWorker();
  }catch(error){
   message('メモを開けませんでした。元の保存データを上書きせず停止しています。ブラウザの保存設定を確認し、再読み込みしてください。 '+error.message);
   setStatus('読み込み停止',true);

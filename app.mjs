@@ -352,15 +352,23 @@ function drawStroke(g,s) {
   g.stroke();i=j;if(i<pts.length)w=(inkWidth(s.width,pts[i-1][2],true)+inkWidth(s.width,pts[i][2],true))/2;
  }
 }
-const yRangeCache=new WeakMap();
-function strokeYRange(s) {
- let r=yRangeCache.get(s);
- if(!r||r[2]!==s.points.length){let y0=Infinity,y1=-Infinity;for(const pt of s.points){if(pt[1]<y0)y0=pt[1];if(pt[1]>y1)y1=pt[1];}r=[y0-s.width*2,y1+s.width*2,s.points.length];yRangeCache.set(s,r);}
+// Bounding box per stroke [x0,y0,x1,y1] (with ink margin), cached and refreshed when points are added.
+const bboxCache=new WeakMap();
+function strokeBBox(s) {
+ let r=bboxCache.get(s);
+ if(!r||r[4]!==s.points.length){
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  for(const pt of s.points){if(pt[0]<x0)x0=pt[0];if(pt[0]>x1)x1=pt[0];if(pt[1]<y0)y0=pt[1];if(pt[1]>y1)y1=pt[1];}
+  const m=s.width*2;r=[x0-m,y0-m,x1+m,y1+m,s.points.length];bboxCache.set(s,r);
+ }
  return r;
 }
-function drawStrokes(g,strokes) {
+const boxesTouch=(a,b)=>!(a[2]<b[0]||a[0]>b[2]||a[3]<b[1]||a[1]>b[3]);
+const boxUnion=(a,b)=>a?[Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[2],b[2]),Math.max(a[3],b[3])]:[b[0],b[1],b[2],b[3]];
+function drawStrokes(g,strokes,clipBox=null) {
  for(const s of strokes){
-  const [y0,y1]=strokeYRange(s);if(y1<inkView.top||y0>inkView.bottom)continue;
+  const bb=strokeBBox(s);if(bb[3]<inkView.top||bb[1]>inkView.bottom)continue;
+  if(clipBox&&!boxesTouch(bb,clipBox))continue;
   drawStroke(g,s);
  }
 }
@@ -379,6 +387,22 @@ function redraw() {
  }
  updateHint();renderSelection();perf.redraw=Math.round(performance.now()-t0);
 }
+// Redraw only a rectangle of the page (page coordinates). Used by the eraser so that removing a
+// bit of ink does not repaint the whole visible strip.
+function redrawRegion(box) {
+ if(!doc||!box)return;const p=page();ensureLayers(p);const t0=performance.now();
+ const x0=Math.max(0,box[0]),y0=Math.max(inkView.top,box[1]),x1=Math.min(W,box[2]),y1=Math.min(inkView.bottom,box[3]);
+ if(x1<=x0||y1<=y0)return;const clip=[x0,y0,x1,y1];
+ ctx.save();ctx.beginPath();ctx.rect(x0,y0,x1-x0,y1-y0);ctx.clip();ctx.clearRect(x0,y0,x1-x0,y1-y0);
+ for(const L of p.layers){
+  if(!L.visible)continue;const strokes=p.strokes.filter(s=>s.layer===L.id&&boxesTouch(strokeBBox(s),clip));if(!strokes.length)continue;
+  if(L.opacity>=1){drawStrokes(ctx,strokes,clip);continue;}
+  if(off.width!==canvas.width||off.height!==canvas.height){off.width=canvas.width;off.height=canvas.height;}
+  octx.save();octx.setTransform(inkView.k,0,0,inkView.k,0,-inkView.top*inkView.k);octx.beginPath();octx.rect(x0,y0,x1-x0,y1-y0);octx.clip();octx.clearRect(x0,y0,x1-x0,y1-y0);drawStrokes(octx,strokes,clip);octx.restore();
+  ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=L.opacity;ctx.drawImage(off,0,0);ctx.restore();
+ }
+ ctx.restore();perf.redraw=Math.round(performance.now()-t0);
+}
 // The layer that receives pen, eraser and selection. Null (with a message) when it is hidden or locked.
 function editableLayer(quiet=false) {
  const p=page();ensureLayers(p);const L=activeLayerOf(p);
@@ -389,21 +413,24 @@ function editableLayer(quiet=false) {
 function updateHint(){const p=page();$('empty-hint').hidden=p.strokes.length>0||p.blocks.length>0;}
 const eraserRadius=()=>Math.max(.5,eraserSize/2);
 function erase(a,b) {
- const p=page(),r=eraserRadius(),next=[],lid=p.activeLayer;let changed=false;
+ const p=page(),r=eraserRadius(),next=[],lid=p.activeLayer;let changed=false,dirty=null;
+ const reach=[Math.min(a[0],b[0])-r-2,Math.min(a[1],b[1])-r-2,Math.max(a[0],b[0])+r+2,Math.max(a[1],b[1])+r+2];
  for(const s of p.strokes){
   if(s.layer!==lid){next.push(s);continue;}
-  if(eraserMode==='whole'){if(hitStroke(s,a,b,r))changed=true;else next.push(s);}
-  else{const parts=erasePart(s,a,b,r);if(parts.length!==1||parts[0]!==s)changed=true;next.push(...parts);}
+  const bb=strokeBBox(s);if(!boxesTouch(bb,reach)){next.push(s);continue;}
+  if(eraserMode==='whole'){if(hitStroke(s,a,b,r)){changed=true;dirty=boxUnion(dirty,bb);}else next.push(s);}
+  else{const parts=erasePart(s,a,b,r);if(parts.length!==1||parts[0]!==s){changed=true;dirty=boxUnion(dirty,bb);}next.push(...parts);}
  }
- if(changed){p.strokes=next;gesture.changed=true;redraw();}
+ if(changed){p.strokes=next;gesture.changed=true;gesture.dirty=boxUnion(gesture.dirty,dirty);}
 }
+function flushEraseRedraw(){if(gesture&&gesture.dirty){const box=gesture.dirty;gesture.dirty=null;redrawRegion(box);}}
 function startInk(e) {
  const L=editableLayer();if(!L)return;
  const point=inkPoint(e);
  const erasing=tool==='eraser'||(e.pointerType==='pen'&&(e.button===5||(e.buttons&32)!==0||(e.buttons&2)!==0));
  gesture={type:'ink',id:e.pointerId,pageId:doc.activeId,before:snapshot(page()),erase:erasing,last:point,changed:false,opacity:L.opacity};
  try{sheet.setPointerCapture(e.pointerId);}catch{}
- if(erasing)erase(point,point);
+ if(erasing){erase(point,point);flushEraseRedraw();}
  else {
   const stroke={color,width,pressure:e.pointerType==='pen'&&$('pressure').checked,points:[point],layer:L.id};
   page().strokes=[...page().strokes,stroke];gesture.stroke=stroke;gesture.changed=true;
@@ -749,6 +776,7 @@ sheet.addEventListener('pointermove',e=>{
    else {gesture.stroke.points.push(point);ctx.globalAlpha=gesture.opacity;segment(gesture.last,point,gesture.stroke);ctx.globalAlpha=1;}
    gesture.last=point;
   }
+  if(gesture.erase)flushEraseRedraw();
   inputStatus(e);return;
  }
  const p=page(),b=blockOf(gesture.blockId);if(!b)return;
@@ -787,7 +815,7 @@ function finish() {
   if(r.x1-r.x0>3||r.y1-r.y0>3)applyMarquee(r,completed.additive);
   return;
  }
- if(completed.changed){const p=pageById(completed.pageId);if(p)commit(completed.before,p);if(completed.type==='ink'){if(completed.needsRedraw||completed.erase)redraw();else{updateHint();renderSelection();}}else{renderBlocks();redraw();}}
+ if(completed.changed){const p=pageById(completed.pageId);if(p)commit(completed.before,p);if(completed.type==='ink'){if(completed.needsRedraw)redraw();else{updateHint();renderSelection();}}else{renderBlocks();redraw();}}
  if(completed.type==='ink')perf.finish=Math.round(performance.now()-t0);
 }
 sheet.addEventListener('pointerleave',()=>{eraserCursor.hidden=true;});

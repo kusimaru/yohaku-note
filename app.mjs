@@ -109,7 +109,7 @@ function renderNotebooks() {
    for(const sec of secs){
     const row=el('div','section-row');
     const tab=el('button','section-tab'+(sec.id===cur.id?' active':''));tab.type='button';tab.draggable=true;tab.dataset.sectionId=sec.id;tab.style.setProperty('--sec',sec.color);
-    tab.append(el('span','sec-color'),el('span','sec-name',sec.name));tab.title='クリックで開く / ドラッグで並べ替え・移動';
+    tab.append(icon('section','sec-icon'),el('span','sec-name',sec.name));tab.title='クリックで開く / ドラッグで並べ替え・移動';
     tab.onclick=()=>selectSection(sec.id);
     row.append(tab,menuButton({type:'section',id:sec.id,label:sec.name}));list.append(row);
    }
@@ -128,11 +128,11 @@ function sortedPages(sectionId) {
 }
 function renderPageList() {
  const cur=currentSection(),head=$('current-section');head.replaceChildren();head.style.setProperty('--sec',cur.color);
- const nb=notebookOf(doc,cur.notebookId);head.append(el('span','sec-color'),el('span','',(nb?nb.name+' › ':'')+cur.name));
+ const nb=notebookOf(doc,cur.notebookId);head.append(icon('section','sec-icon'),el('span','',(nb?nb.name+' › ':'')+cur.name));
  const list=sortedPages(cur.id),box=$('pages');
  for(const pg of list){
   const button=el('button','page-button'+(pg.id===doc.activeId?' active':''));button.type='button';button.dataset.pageId=pg.id;button.draggable=true;button.setAttribute('aria-current',pg.id===doc.activeId?'page':'false');
-  const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(icon('file'),label);button.append(name);
+  const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(icon('page'),label);button.append(name);
   const sub=el('small','',new Date(pg.updatedAt).toLocaleDateString('ja-JP'));button.append(sub);
   button.onclick=()=>openPage(pg.id);
   const item=el('div','page-item');item.append(button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));box.append(item);

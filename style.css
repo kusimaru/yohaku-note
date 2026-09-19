@@ -593,3 +593,20 @@ body .sidebar #pages{display:block;min-height:60px;flex:none;overflow:visible}
 /* trash view uses the page column only */
 .nav-cols.trash .nav-notebooks,.nav-cols.trash .pages-head,.nav-cols.trash .current-section,.nav-cols.trash .list-tip{display:none}
 .nav-cols.trash .nav-pages{flex:1}
+
+/* ---------- nav v2: rows left-aligned, one icon per role (book / folder / page) ---------- */
+.notebook-button,.section-tab,.add-section-link,.add-notebook{justify-content:flex-start}
+.notebook-button,.section-tab{padding-right:44px}
+.notebook-button{padding-left:4px;gap:8px}
+.sections{margin:2px 0 4px 17px;padding-left:10px;border-left:2px solid #cfd8d0}
+.section-tab{padding-left:8px;gap:9px}
+.section-tab .sec-icon{flex:none;width:var(--ui-icon);height:var(--ui-icon);fill:var(--sec);stroke:var(--sec);stroke-width:1.5}
+.section-tab.active .sec-icon{filter:brightness(.9)}
+.current-section{gap:7px}
+.current-section .sec-icon{width:18px;height:18px;fill:var(--sec);stroke:var(--sec);stroke-width:1.5}
+.add-section-link{padding-left:8px;color:#5a3ea6;font-weight:600}
+.add-notebook{margin-top:4px;border-top:1px solid #d8dfd9;border-radius:0;padding-left:4px}
+.nav-pages .page-button .icon{display:block;flex:none;width:var(--ui-icon);height:var(--ui-icon);color:#7a8f82}
+.nav-pages .page-button.active .icon{color:#2f5a4a}
+.nav-pages .page-button>span{gap:8px}
+body .nav-pages .page-button small{margin-left:calc(var(--ui-icon) + 8px)}

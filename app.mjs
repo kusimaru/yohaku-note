@@ -29,9 +29,15 @@ function message(text,retry=false) {
  if(retry){const button=document.createElement('button');button.textContent='保存を再試行';button.onclick=()=>{saveFailed=false;save();};$('message').append(' ',button);}
 }
 function setStatus(text,error=false){$('save-status').replaceChildren(...(text==='保存済み'?[icon('check'),' ']:[]),text);$('save-status').classList.toggle('error',error);}
+let saveTimer=0;
+// Which items the next save must write. Pages/trash entries that appear or disappear are
+// detected by comparing ids with the last successful save; everything else is marked here.
+const dirtyPages=new Set(),dirtyTrash=new Set();let dirtyAll=false,dropLegacy=false,lastSaved={pages:new Set(),trash:new Set()};
+// Pages changed indirectly (moved to another category, category renamed) must be saved and uploaded too.
+function touchPages(ids){for(const id of ids){dirtyPages.add(id);const pg=doc.pages.find(x=>x.id===id);if(pg)pg.updatedAt=Date.now();if(syncEngine&&!applyingRemote)syncEngine.markPage(id);}}
 function changed(p=page()) {
- p.updatedAt=Date.now();revision++;dirty=true;
- setStatus('保存中…');save();
+ p.updatedAt=Date.now();revision++;dirty=true;dirtyPages.add(p.id);
+ setStatus('保存中…');clearTimeout(saveTimer);saveTimer=setTimeout(save,300);
  if(syncEngine&&!applyingRemote){syncEngine.markPage(p.id);syncObserve();}
 }
 async function save() {
@@ -40,7 +46,13 @@ async function save() {
  try {
   while(dirty) {
    const version=revision;
-   await saveNotebook(db,doc);
+   const set={pages:new Set(dirtyPages),trash:new Set(dirtyTrash)},all=dirtyAll,legacy=dropLegacy;
+   dirtyPages.clear();dirtyTrash.clear();dirtyAll=false;dropLegacy=false;
+   for(const pg of doc.pages)if(!lastSaved.pages.has(pg.id))set.pages.add(pg.id);
+   for(const t of doc.trash||[])if(!lastSaved.trash.has(t.id))set.trash.add(t.id);
+   try{await saveNotebook(db,doc,all?null:set,legacy);}
+   catch(e){for(const id of set.pages)dirtyPages.add(id);for(const id of set.trash)dirtyTrash.add(id);if(all)dirtyAll=true;if(legacy)dropLegacy=true;throw e;}
+   lastSaved={pages:new Set(doc.pages.map(pg=>pg.id)),trash:new Set((doc.trash||[]).map(t=>t.id))};
    if(version===revision)dirty=false;
   }
   setStatus('保存済み');
@@ -212,6 +224,7 @@ pagesEl.addEventListener('drop',e=>{
   if(t.cls==='drop-into')moved=movePage(doc,d.id,t.category,null);
   else if(t.cls==='drop-before')moved=movePage(doc,d.id,t.category,t.pageId);
   else{const list=doc.pages.filter(p=>categoryOf(p)===t.category),i=list.findIndex(p=>p.id===t.pageId);moved=movePage(doc,d.id,t.category,list[i+1]?list[i+1].id:null);}
+  if(moved)touchPages([d.id]);
   if(moved&&d.id===doc.activeId){$('page-category').value=page().category||'';breadcrumb();}
  } else {
   if(t.cls==='drop-before')moved=moveCategory(doc,d.name,t.category);
@@ -232,6 +245,7 @@ $('new-category').onsubmit=e=>{
  if(mode.kind==='rename-category'){
   const wanted=$('new-category-name').value.trim()||uniqueCategoryName();
   const next=renameCategory(doc,mode.name,wanted);if(!next)return;
+  touchPages(doc.pages.filter(pg=>categoryOf(pg)===next).map(pg=>pg.id));
   $('new-category').hidden=true;formMode=null;collapsed.delete(next);
   $('page-category').value=page().category||'';breadcrumb();changed();renderPages();return;
  }
@@ -264,7 +278,7 @@ function growPage(p,needed) {
 }
 function layout() {
  if(!doc)return;
- const p=page();scale=paper.clientWidth/W||1;
+ const p=page();scale=paper.clientWidth/W||1;sheetRectCache=null;
  sheet.style.setProperty('--ui-inverse-scale',1/scale);sheet.style.height=p.height+'px';sheet.style.transform='scale('+scale+')';lassoEl.setAttribute('height',p.height);
  paper.style.height=Math.round(p.height*scale)+'px';
  $('page-size').textContent='ページの高さ '+p.height+' / 最大 '+MAX_HEIGHT;$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;
@@ -274,7 +288,13 @@ function layout() {
 // whole page. A page-sized canvas at high DPI (e.g. 2400 x 12000 px on a Surface at 200 %) is
 // too large for GPU rasterisation and every pen segment then repaints the whole bitmap, which
 // showed up as a 2-3 second pen lag. Coordinates stay in page space via the canvas transform.
-const VIEW_MARGIN=300,MAX_CANVAS_PIXELS=8e6;
+const VIEW_MARGIN=300;
+// Drawing quality: 'light' halves the ink resolution and caps the canvas at 2.5 M pixels for
+// machines whose browser rasterises the canvas in software (seen as pen lag on a Surface Pro).
+let quality='normal';try{quality=localStorage.getItem('yohaku-quality')==='light'?'light':'normal';}catch{}
+const qualityLimits=()=>quality==='light'?{dpr:1,pixels:2.5e6}:{dpr:3,pixels:8e6};
+$('view-quality').value=quality;
+$('view-quality').onchange=e=>{quality=e.target.value==='light'?'light':'normal';try{localStorage.setItem('yohaku-quality',quality);}catch{}updateViewportCanvas(true);message(quality==='light'?'描画を「軽い」にしました。手書きの解像度を下げて、ペンの遅れを減らします。':'描画を「標準」に戻しました。');};
 let inkView={top:0,bottom:0,k:1},viewRaf=0;
 function viewportRange() {
  const rect=sheet.getBoundingClientRect(),p=page();
@@ -285,7 +305,7 @@ function updateViewportCanvas(force=false) {
  if(!doc)return;const p=page();const [vt,vb]=viewportRange();
  if(!force&&vt>=inkView.top&&vb<=inkView.bottom)return;
  const top=Math.max(0,vt-VIEW_MARGIN),bottom=Math.min(p.height,vb+VIEW_MARGIN),h=Math.max(1,bottom-top);
- let k=scale*Math.min(devicePixelRatio||1,3);const pixels=W*k*h*k;if(pixels>MAX_CANVAS_PIXELS)k*=Math.sqrt(MAX_CANVAS_PIXELS/pixels);
+ const q=qualityLimits();let k=scale*Math.min(devicePixelRatio||1,q.dpr);const pixels=W*k*h*k;if(pixels>q.pixels)k*=Math.sqrt(q.pixels/pixels);
  inkView={top,bottom,k};
  canvas.style.top=top+'px';canvas.style.height=h+'px';
  canvas.width=Math.max(1,Math.round(W*k));canvas.height=Math.max(1,Math.round(h*k));
@@ -296,8 +316,10 @@ const onViewportScroll=()=>{if(viewRaf)return;viewRaf=requestAnimationFrame(()=>
 window.addEventListener('scroll',onViewportScroll,{passive:true});window.addEventListener('resize',onViewportScroll);
 document.getElementById('paper-viewport')?.addEventListener('scroll',onViewportScroll,{passive:true});
 new ResizeObserver(()=>{if(paper.clientWidth!==lastPaperWidth){lastPaperWidth=paper.clientWidth;layout();}}).observe(paper);
+let sheetRectCache=null;
+function sheetRect(){if(!sheetRectCache){sheetRectCache=sheet.getBoundingClientRect();requestAnimationFrame(()=>{sheetRectCache=null;});}return sheetRectCache;}
 function coordinates(e) {
- const rect=sheet.getBoundingClientRect();
+ const rect=sheetRect();
  return [(e.clientX-rect.left)/scale,(e.clientY-rect.top)/scale,clamp(e.pressure||.5,0,1)];
 }
 function inkPoint(e) {
@@ -310,7 +332,25 @@ function dot(p,r,c,g=ctx) {g.fillStyle=c;g.beginPath();g.arc(p[0],p[1],r,0,Math.
 function segment(a,b,s,g=ctx) {
  const wa=inkWidth(s.width,a[2],s.pressure),wb=inkWidth(s.width,b[2],s.pressure);
  g.strokeStyle=s.color;g.lineWidth=(wa+wb)/2;g.lineCap='round';g.lineJoin='round';
- g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);g.stroke();dot(b,wb/2,s.color,g);
+ g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);g.stroke();
+}
+function drawStroke(g,s) {
+ const pts=s.points;
+ if(pts.length===1){dot(pts[0],inkWidth(s.width,pts[0][2],s.pressure)/2,s.color,g);return;}
+ if(!s.pressure){
+  g.strokeStyle=s.color;g.lineWidth=s.width;g.lineCap='round';g.lineJoin='round';
+  g.beginPath();g.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<pts.length;i++)g.lineTo(pts[i][0],pts[i][1]);g.stroke();return;
+ }
+ g.lineCap='round';g.lineJoin='round';g.strokeStyle=s.color;
+ // pressure: group consecutive segments whose width barely changes into one path
+ let i=1,w=(inkWidth(s.width,pts[0][2],true)+inkWidth(s.width,pts[1][2],true))/2;
+ while(i<pts.length){
+  g.lineWidth=w;g.beginPath();g.moveTo(pts[i-1][0],pts[i-1][1]);
+  let j=i;
+  for(;j<pts.length;j++){const wj=(inkWidth(s.width,pts[j-1][2],true)+inkWidth(s.width,pts[j][2],true))/2;if(Math.abs(wj-w)>Math.max(.35,w*.12))break;g.lineTo(pts[j][0],pts[j][1]);}
+  if(j===i){g.lineTo(pts[i][0],pts[i][1]);j=i+1;}
+  g.stroke();i=j;if(i<pts.length)w=(inkWidth(s.width,pts[i-1][2],true)+inkWidth(s.width,pts[i][2],true))/2;
+ }
 }
 const yRangeCache=new WeakMap();
 function strokeYRange(s) {
@@ -321,14 +361,13 @@ function strokeYRange(s) {
 function drawStrokes(g,strokes) {
  for(const s of strokes){
   const [y0,y1]=strokeYRange(s);if(y1<inkView.top||y0>inkView.bottom)continue;
-  dot(s.points[0],inkWidth(s.width,s.points[0][2],s.pressure)/2,s.color,g);
-  for(let i=1;i<s.points.length;i++)segment(s.points[i-1],s.points[i],s,g);
+  drawStroke(g,s);
  }
 }
 // Layers are painted bottom to top. A translucent layer is drawn on an offscreen canvas
 // first so overlapping strokes inside it do not darken each other.
 function redraw() {
- if(!doc)return;const p=page();ensureLayers(p);
+ if(!doc)return;const p=page();ensureLayers(p);const t0=performance.now();
  ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.restore();
  for(const L of p.layers){
   if(!L.visible)continue;const strokes=p.strokes.filter(s=>s.layer===L.id);if(!strokes.length)continue;
@@ -338,7 +377,7 @@ function redraw() {
   drawStrokes(octx,strokes);
   ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=L.opacity;ctx.drawImage(off,0,0);ctx.restore();
  }
- updateHint();renderSelection();
+ updateHint();renderSelection();perf.redraw=Math.round(performance.now()-t0);
 }
 // The layer that receives pen, eraser and selection. Null (with a message) when it is hidden or locked.
 function editableLayer(quiet=false) {
@@ -367,10 +406,21 @@ function startInk(e) {
  if(erasing)erase(point,point);
  else {
   const stroke={color,width,pressure:e.pointerType==='pen'&&$('pressure').checked,points:[point],layer:L.id};
-  page().strokes=[...page().strokes,stroke];gesture.stroke=stroke;gesture.changed=true;redraw();
+  page().strokes=[...page().strokes,stroke];gesture.stroke=stroke;gesture.changed=true;
+  ctx.globalAlpha=L.opacity;dot(point,inkWidth(width,point[2],stroke.pressure)/2,color);ctx.globalAlpha=1;
+  // Redraw everything at the end only when the live drawing cannot be the final picture:
+  // the layer is translucent (joints would darken) or another visible layer sits above it.
+  const above=page().layers.slice(page().layers.indexOf(L)+1).some(x=>x.visible);
+  gesture.needsRedraw=L.opacity<1||above;
  }
 }
-function inputStatus(e){$('input-status').textContent=e.pointerType==='pen'?'ペン入力 · 筆圧 '+(e.pressure||0).toFixed(2):e.pointerType==='touch'?'タッチ':'マウス入力';}
+const perf={finish:0,redraw:0,points:0};let statusRaf=0,statusEvent=null;
+function inputStatus(e){
+ statusEvent=e;if(statusRaf)return;
+ statusRaf=requestAnimationFrame(()=>{statusRaf=0;const ev=statusEvent;if(!ev)return;
+  const base=ev.pointerType==='pen'?'ペン入力 · 筆圧 '+(ev.pressure||0).toFixed(2):ev.pointerType==='touch'?'タッチ':'マウス入力';
+  $('input-status').textContent=base+(perf.points?' · 前の線 '+perf.points+'点 / 確定 '+perf.finish+'ms / 描画 '+perf.redraw+'ms':'');});
+}
 // ---- selection ----
 function strokeBounds(s) {
  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
@@ -709,9 +759,9 @@ sheet.addEventListener('pointermove',e=>{
 });
 function finish() {
  if(!gesture)return;
- const completed=gesture;gesture=null;
+ const completed=gesture;gesture=null;const t0=performance.now();if(completed.stroke)perf.points=completed.stroke.points.length;
  if(sheet.hasPointerCapture?.(completed.id))sheet.releasePointerCapture(completed.id);
- if(completed.type==='ink')lastInkEnd=performance.now();
+ lastInkEnd=performance.now(); // any gesture: the click that follows it must not create a text block
  if(completed.type==='lasso'){
   renderLasso([]);lassoEl.setAttribute('hidden','');
   if(completed.pageId!==doc.activeId)return;
@@ -727,7 +777,8 @@ function finish() {
   if(r.x1-r.x0>3||r.y1-r.y0>3)applyMarquee(r,completed.additive);
   return;
  }
- if(completed.changed){const p=pageById(completed.pageId);if(p)commit(completed.before,p);if(completed.type==='ink')redraw();else{renderBlocks();redraw();}}
+ if(completed.changed){const p=pageById(completed.pageId);if(p)commit(completed.before,p);if(completed.type==='ink'){if(completed.needsRedraw||completed.erase)redraw();else{updateHint();renderSelection();}}else{renderBlocks();redraw();}}
+ if(completed.type==='ink')perf.finish=Math.round(performance.now()-t0);
 }
 sheet.addEventListener('pointerleave',()=>{eraserCursor.hidden=true;});
 for(const event of ['pointerup','pointercancel','lostpointercapture'])sheet.addEventListener(event,e=>{if(gesture&&e.pointerId===gesture.id)finish();});
@@ -991,7 +1042,7 @@ $('import-file').onchange=async e=>{
   if(file.size>200*1024*1024)throw new Error('200MB以下のバックアップを選んでください。');
   const incoming=upgradeNotebook(JSON.parse(await file.text()));finish();
   const draft=structuredClone(doc),r=mergeNotebook(draft,incoming);
-  doc=validateBackup(draft);histories.clear();showPage();changed();
+  doc=validateBackup(draft);histories.clear();dirtyAll=true;showPage();changed();
   message('取り込みました：新しいページ '+r.added+'、更新 '+r.updated+'、変更なし '+r.unchanged+(r.skipped?'、ゴミ箱にあるため戻さなかったページ '+r.skipped:'')+'。同じページは日時の新しい方を残しています。');
  }catch(error){message('読み込めませんでした。元のメモは変更していません。 '+error.message);}
 };
@@ -1034,7 +1085,7 @@ function applyRemotePage(id,pg) {
    if(!doc.pages.length)doc.pages.push(newPage('はじめのページ'));
    if(doc.activeId===id)doc.activeId=doc.pages[Math.min(i,doc.pages.length-1)].id;
   } else {
-   ensureLayers(pg);if(i>=0)doc.pages[i]=pg;else doc.pages.push(pg);histories.delete(id);
+   ensureLayers(pg);if(i>=0)doc.pages[i]=pg;else doc.pages.push(pg);histories.delete(id);dirtyPages.add(id);
   }
   normalizeCategories(doc);revision++;dirty=true;
   if(!pg||id===doc.activeId)showPage();else renderPages();
@@ -1046,7 +1097,7 @@ function applyRemoteTrash(id,entry) {
  try{
   doc.trash=(doc.trash||[]).filter(t=>t.id!==id);
   if(entry){
-   doc.trash.push(entry);
+   doc.trash.push(entry);dirtyTrash.add(id);
    const ids=new Set(entry.pages.map(pg=>pg.id));
    if(doc.pages.some(pg=>ids.has(pg.id))){doc.pages=doc.pages.filter(pg=>!ids.has(pg.id));if(!doc.pages.length)doc.pages.push(newPage('はじめのページ'));if(!doc.pages.some(pg=>pg.id===doc.activeId))doc.activeId=doc.pages[0].id;}
   }
@@ -1131,7 +1182,8 @@ function setupServiceWorker() {
 }
 async function start() {
  try{
-  db=await openStore();const saved=await loadNotebook(db);
+  db=await openStore();const loaded=await loadNotebook(db),saved=loaded.doc;
+  if(loaded.legacy&&saved&&saved.version!==1){dirtyAll=true;dropLegacy=true;dirty=true;revision++;} // move the old single document to the split layout
   if(saved&&saved.version===1){
    const next=upgradeNotebook(saved);await migrateNotebook(db,saved,next);doc=next;
    message('以前のメモを新しい形式に変換しました。文章はページ内の入力欄に移し、手書きの位置はそのままです。変換前のデータもブラウザ内に残しています。');
@@ -1139,6 +1191,8 @@ async function start() {
   else if(saved)doc=validateBackup(saved);
   else{const p=newPage('はじめのページ');doc={version:2,pages:[p],activeId:p.id};}
   let filled=false;for(const p of doc.pages)if(ensureLayers(p))filled=true;
+  lastSaved={pages:new Set(doc.pages.map(pg=>pg.id)),trash:new Set((doc.trash||[]).map(t=>t.id))};
+  if(filled)dirtyAll=true;
   ready=true;document.querySelectorAll('button,input,textarea').forEach(el=>el.disabled=false);
   lastPaperWidth=paper.clientWidth;showPage();chooseTool('text');
   if(filled){revision++;dirty=true;save();}
@@ -1224,13 +1278,15 @@ function initializePresentation(){
   }
  });
  syncNavigation();
- function setLayers(opened){
+ function setLayers(opened,remember=true){
   layerPanel.hidden=!opened;$('layers-toggle').setAttribute('aria-expanded',String(opened));
   if(opened&&layerPanel.classList.contains('collapsed'))$('layer-collapse').click();
+  if(remember)try{localStorage.setItem('yohaku-layers-open',opened?'1':'0');}catch{}
  }
  $('layers-toggle').onclick=()=>setLayers(layerPanel.hidden);
  $('layer-close').onclick=()=>{setLayers(false);$('layers-toggle').focus();};
- setLayers(false);
+ let layersPref=null;try{layersPref=localStorage.getItem('yohaku-layers-open');}catch{}
+ setLayers(layersPref==='1'||(layersPref===null&&innerWidth>1180),false);
  const zoom=$('view-zoom');
  try{const saved=localStorage.getItem('yohaku-view-zoom');if(['fit','.75','1','1.25'].includes(saved))zoom.value=saved;}catch{}
  function applyZoom(){

@@ -458,3 +458,5 @@ body.ios .sheet.select .block{touch-action:none}
 .sync-status{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#51765e;white-space:nowrap;margin-right:10px}
 .sync-status .icon{width:14px;height:14px}
 .sync-status.warn{color:#8a6b1f}.sync-status.err{color:#a2363b}.sync-status.off{color:#8a948b}
+
+#view-quality{margin-right:8px}

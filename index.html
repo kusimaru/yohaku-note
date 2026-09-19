@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#294e48"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="余白ノート"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="apple-touch-icon" href="icon.svg"><title>余白ノート — 手書き対応メモ</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="style.css">
+<script type="module" src="app.mjs"></script></head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"><symbol id="i-type" viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></symbol><symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol><symbol id="i-eraser" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></symbol><symbol id="i-line-x" viewBox="0 0 24 24"><path d="M3 17c4-8 10-8 18 0"/><path d="m9 7 6 6"/><path d="m15 7-6 6"/></symbol><symbol id="i-pointer" viewBox="0 0 24 24"><path d="M4 4.7a.5.5 0 0 1 .7-.7l16 6.5a.5.5 0 0 1-.1 1l-6.1 1.5a2 2 0 0 0-1.4 1.5l-1.6 6.1a.5.5 0 0 1-.9 0Z"/></symbol><symbol id="i-square-dashed" viewBox="0 0 24 24"><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M21 19a2 2 0 0 1-2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1.5"/><path d="M9 21h1.5"/><path d="M13.5 3H15"/><path d="M13.5 21H15"/><path d="M3 9v1.5"/><path d="M21 9v1.5"/><path d="M3 13.5V15"/><path d="M21 13.5V15"/></symbol><symbol id="i-lasso" viewBox="0 0 24 24"><path d="M7 22a5 5 0 0 1-2-4"/><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"/><path d="M5 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></symbol><symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol><symbol id="i-redo" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol><symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol><symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol><symbol id="i-file-plus" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M9 15h6"/><path d="M12 18v-6"/></symbol><symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol><symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol><symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></symbol><symbol id="i-vector" viewBox="0 0 24 24"><path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.6 7.6"/><circle cx="11" cy="11" r="2"/></symbol><symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol><symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/><circle cx="5" cy="12" r="1.2"/></symbol><symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.9 9.9a3 3 0 1 0 4.2 4.2"/><path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><line x1="2" x2="22" y1="2" y2="22"/></symbol><symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol><symbol id="i-unlock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></symbol><symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol><symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol><symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></symbol><symbol id="i-move" viewBox="0 0 24 24"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/></symbol><symbol id="i-layers" viewBox="0 0 24 24"><path d="m12.8 2.2a2 2 0 0 0-1.7 0L2.6 6.1a1 1 0 0 0 0 1.8l8.6 3.9a2 2 0 0 0 1.7 0l8.6-3.9a1 1 0 0 0 0-1.8Z"/><path d="m22 17.7-9.2 4.1a2 2 0 0 1-1.7 0L2 17.7"/><path d="m22 12.7-9.2 4.1a2 2 0 0 1-1.7 0L2 12.7"/></symbol><symbol id="i-bold" viewBox="0 0 24 24"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/></symbol><symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol><symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol><symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol><symbol id="i-chevrons-down" viewBox="0 0 24 24"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="i-palette" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="8" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="7" r="1.3" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1.3" fill="currentColor" stroke="none"/><path d="M12 22c-2-2-1.5-4 0-5s2.5-3 1-5"/></symbol><symbol id="i-width" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M3 12h18" stroke-width="3"/><path d="M3 18.5h18" stroke-width="4"/></symbol><symbol id="i-text-smaller" viewBox="0 0 24 24"><path d="M3 20 8.5 6h1L15 20"/><path d="M5.3 15h6.4"/><path d="M15 13h6"/></symbol><symbol id="i-text-larger" viewBox="0 0 24 24"><path d="M3 20 8.5 6h1L15 20"/><path d="M5.3 15h6.4"/><path d="M15 12h6"/><path d="M18 9v6"/></symbol><symbol id="i-restore" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol><symbol id="i-back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol><symbol id="i-tools" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol><symbol id="i-menu" viewBox="0 0 24 24"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></symbol><symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v1"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.9-2.5L2.4 15.1a2 2 0 0 1 3.2-2.4L7 14"/></symbol></svg>
+<div class="app">
+<aside class="sidebar" id="sidebar" aria-label="ノートのページ一覧"><button type="button" id="nav-close" class="nav-close icon-only" aria-label="ページ一覧を閉じる"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+ <div class="brand"><span class="brand-mark">余</span><div><h1>余白ノート</h1><p>考える、書く、残す。</p></div></div>
+ <div class="notebook-name">MY NOTEBOOK <span>ローカル版</span></div>
+ <button id="add-page" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-file-plus"/></svg>ページを追加</button>
+ <button id="add-category" class="secondary" disabled><svg class="icon" aria-hidden="true"><use href="#i-folder-plus"/></svg>カテゴリを追加</button>
+ <form id="new-category" class="new-category" hidden><div id="form-title" class="form-title">新しいカテゴリ</div><input id="new-category-name" maxlength="120" placeholder="カテゴリ名（例：仕事）" aria-label="名前" autocomplete="off"><div><button type="submit" class="primary" id="form-submit">作成</button><button type="button" id="new-category-cancel">やめる</button></div></form>
+ <div class="list-heading"><span id="list-title">ページ</span> <span id="page-count">0</span></div>
+ <div class="list-tip" id="list-tip">「⋯」で名前の変更・ゴミ箱へ移動</div>
+ <nav id="pages" aria-label="ページ一覧"></nav>
+ <button id="trash-toggle" class="trash-toggle" aria-pressed="false" disabled><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>ゴミ箱 <span id="trash-count">0</span></button>
+ <div id="item-menu" class="item-menu" role="menu" hidden><button type="button" id="menu-rename" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>名前の変更</button><button type="button" id="menu-delete" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="menu-delete-label">ゴミ箱へ移動</span></button></div>
+ <div class="sidebar-bottom"><p><span class="local-dot"></span> このブラウザに保存</p>
+ <p class="small">クラウド送信はありません。<br>大切なメモはバックアップを。</p>
+ <details id="file-tools"><summary>保存・書き出し</summary><button id="export-svg" disabled title="このページを Illustrator などで編集できる SVG 形式で保存します"><svg class="icon" aria-hidden="true"><use href="#i-vector"/></svg>このページをSVGで書き出す</button>
+ <button id="export" disabled><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>バックアップを書き出す</button>
+ <button id="import" disabled><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>バックアップを読み込む</button>
+ <input type="file" id="import-file" accept=".json,application/json" hidden></details>
+ </div>
+</aside>
+<button id="nav-backdrop" class="nav-backdrop" aria-label="ページ一覧を閉じる" hidden></button><main>
+ <header class="topbar"><button type="button" id="nav-toggle" aria-controls="sidebar" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg>ページ</button><span class="topbar-path">わたしのノート <span class="slash">/</span> <span id="breadcrumb">はじめのページ</span></span>
+ <button type="button" id="layers-toggle" aria-controls="layer-panel" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg>レイヤー</button><span id="save-status" role="status" aria-live="polite">準備中…</span></header>
+ <div id="message" class="message" role="alert" hidden></div>
+ <section class="workspace">
+ <div class="page-heading"><div class="eyebrow">わたしのページ</div>
+ <input id="page-title" aria-label="ページのタイトル" maxlength="120" placeholder="ページのタイトル" disabled>
+ <div class="page-meta"><label for="page-category">カテゴリ</label><input id="page-category" list="category-list" maxlength="60" placeholder="未分類（入力して分類）" disabled><datalist id="category-list"></datalist></div></div>
+ <div class="toolbar" aria-label="ツール">
+  <div class="tool-group modes"><span class="group-label"><svg class="icon" aria-hidden="true"><use href="#i-tools"/></svg>道具</span>
+   <button id="tool-text" class="selected" aria-pressed="true" disabled title="クリックした場所に文字を入力"><svg class="icon" aria-hidden="true"><use href="#i-type"/></svg>テキスト</button>
+   <button id="tool-pen" aria-pressed="false" disabled title="手書き"><svg class="icon" aria-hidden="true"><use href="#i-pen"/></svg>ペン</button>
+   <button id="tool-eraser" aria-pressed="false" disabled title="手書きを消す"><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg>消しゴム</button>
+   <button id="tool-select" aria-pressed="false" disabled title="手書き・文字・画像を選んで動かす"><svg class="icon" aria-hidden="true"><use href="#i-pointer"/></svg>選択</button>
+  </div>
+  <div class="tool-group sub-options" id="eraser-options" hidden>
+   <button id="eraser-part" class="selected" aria-pressed="true" disabled title="通った所だけ消す"><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg>なぞった部分</button>
+   <button id="eraser-whole" aria-pressed="false" disabled title="触れた線を一本ごと消す"><svg class="icon" aria-hidden="true"><use href="#i-line-x"/></svg>線ごと</button>
+   <label for="eraser-size">大きさ</label><input id="eraser-size" type="range" min="1" max="40" value="8" disabled><output id="eraser-size-value" for="eraser-size">8</output>
+  </div>
+  <div class="tool-group sub-options" id="select-options" hidden>
+   <button id="select-rect" class="selected" aria-pressed="true" disabled title="四角で囲んで、触れた線をまるごと選ぶ"><svg class="icon" aria-hidden="true"><use href="#i-square-dashed"/></svg>四角で囲む</button>
+   <button id="select-lasso" aria-pressed="false" disabled title="自由に囲んだ部分だけを選ぶ"><svg class="icon" aria-hidden="true"><use href="#i-lasso"/></svg>投げ縄</button>
+  </div>
+  <div class="tool-group colors" aria-label="インクの色"><span class="group-label"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg>色</span>
+   <button class="swatch selected" data-color="#243c3a" style="--swatch:#243c3a" aria-label="墨色" aria-pressed="true" disabled></button>
+   <button class="swatch" data-color="#000000" style="--swatch:#000000" aria-label="黒" aria-pressed="false" disabled></button>
+   <button class="swatch" data-color="#ffffff" style="--swatch:#ffffff" aria-label="白" aria-pressed="false" disabled></button>
+   <button class="swatch" data-color="#4268b0" style="--swatch:#4268b0" aria-label="青色" aria-pressed="false" disabled></button>
+   <button class="swatch" data-color="#bf5860" style="--swatch:#bf5860" aria-label="赤色" aria-pressed="false" disabled></button>
+   <button class="swatch" data-color="#b78430" style="--swatch:#b78430" aria-label="黄色" aria-pressed="false" disabled></button>
+   <button class="swatch" data-color="#6d5a9b" style="--swatch:#6d5a9b" aria-label="紫色" aria-pressed="false" disabled></button>
+   <input type="color" id="color" value="#243c3a" aria-label="好きな色" disabled>
+  </div>
+  <div class="tool-group"><label for="width" class="group-label"><svg class="icon" aria-hidden="true"><use href="#i-width"/></svg>太さ</label><input id="width" type="range" min="1" max="24" value="4" disabled><output id="width-value" for="width">4</output></div>
+  <label class="check-label"><input type="checkbox" id="pressure" checked disabled> 筆圧</label>
+  <label class="check-label" title="テキストモードでも、ペンで触れた場所は手書きになります"><input type="checkbox" id="auto-pen" checked disabled> ペンは常に手書き</label>
+  <div class="tool-group"><button id="add-image" disabled title="画像ファイルを貼り付ける（Ctrl+V やドロップでも可）"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg>画像</button><input type="file" id="image-file" accept="image/png,image/jpeg,image/webp" multiple hidden></div>
+  <div class="tool-group history"><button id="undo" class="icon-only" aria-label="元に戻す" title="元に戻す（Ctrl+Z）" disabled><svg class="icon" aria-hidden="true"><use href="#i-undo"/></svg></button><button id="redo" class="icon-only" aria-label="やり直す" title="やり直す（Ctrl+Shift+Z）" disabled><svg class="icon" aria-hidden="true"><use href="#i-redo"/></svg></button></div>
+  <div class="text-tools" aria-label="文字の書式">
+   <span class="group-label"><svg class="icon" aria-hidden="true"><use href="#i-type"/></svg>文字</span>
+   <div class="tool-group"><button id="fmt-bold" title="選択した文字を太字にする（選択がなければ入力欄全体）" disabled><svg class="icon" aria-hidden="true"><use href="#i-bold"/></svg>太字</button></div>
+   <div class="tool-group sizes" aria-label="文字の大きさ"><button id="fmt-smaller" class="icon-only" title="文字を小さく" aria-label="文字を小さく" disabled><svg class="icon" aria-hidden="true"><use href="#i-text-smaller"/></svg></button><button id="fmt-larger" class="icon-only" title="文字を大きく" aria-label="文字を大きく" disabled><svg class="icon" aria-hidden="true"><use href="#i-text-larger"/></svg></button><button class="fmt-size" data-size="12" disabled>小</button><button class="fmt-size" data-size="15" disabled>標準</button><button class="fmt-size" data-size="20" disabled>大</button><button class="fmt-size" data-size="28" disabled>特大</button></div>
+   <div class="tool-group fmt-colors" aria-label="文字の色">
+    <button class="fmt-color" data-color="#bf5860" style="--swatch:#bf5860" aria-label="文字を赤色にする" disabled></button>
+    <button class="fmt-color" data-color="#4268b0" style="--swatch:#4268b0" aria-label="文字を青色にする" disabled></button>
+    <button class="fmt-color" data-color="#3c8a5a" style="--swatch:#3c8a5a" aria-label="文字を緑色にする" disabled></button>
+    <button class="fmt-color" data-color="#b78430" style="--swatch:#b78430" aria-label="文字を黄色にする" disabled></button>
+    <button class="fmt-color" data-color="#6d5a9b" style="--swatch:#6d5a9b" aria-label="文字を紫色にする" disabled></button>
+    <button class="fmt-color" data-color="#000000" style="--swatch:#000000" aria-label="文字を黒にする" disabled></button>
+    <input type="color" id="fmt-color-pick" value="#bf5860" aria-label="文字を好きな色にする" disabled>
+    <button id="fmt-color-clear" title="文字の色を元に戻す" disabled>色なし</button>
+   </div>
+   <div class="tool-group"><button id="fmt-hr" title="カーソルの位置に罫線を入れる" disabled><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg>罫線を挿入</button></div>
+   <span id="fmt-hint" class="fmt-hint">文字を選んでから押すと、その部分だけに効きます</span>
+  </div>
+ </div>
+ <div class="view-strip"><div class="view-actions"><button type="button" id="view-pan" aria-pressed="false" title="書き込まずに指でスクロール"><svg class="icon" aria-hidden="true"><use href="#i-hand"/></svg>閲覧</button><label for="view-zoom">表示</label><select id="view-zoom" aria-label="表示倍率"><option value="fit">全体表示</option><option value=".75">75%</option><option value="1" selected>100%</option><option value="1.25">125%</option></select></div><span class="view-note">文字・手書き・画像を、ひとつのページに</span></div><div class="paper-caption"><span id="tool-hint">クリックした場所に文字を入力できます</span><span id="input-status">ペン・マウスに対応</span></div>
+ <div id="paper-viewport" class="paper-viewport"><div id="paper" class="paper">
+  <div id="sheet" class="sheet" aria-label="ページ。文字、手書き、画像を同じ場所に置けます">
+   <div id="blocks"></div>
+   <canvas id="canvas" width="1200" height="1200"></canvas>
+   <div id="selection" class="selection" hidden></div>
+   <div id="marquee" class="marquee" hidden></div>
+   <svg id="lasso" class="lasso" width="1200" height="1200" hidden><path d=""></path></svg>
+   <div id="eraser-cursor" class="eraser-cursor" hidden></div>
+   <div id="empty-hint" class="empty-hint" hidden><strong>ここをクリックして文字を入力</strong><small>ペンで手書き、画像の貼り付け（Ctrl+V）やドロップもできます</small></div>
+  </div>
+ </div>
+ </div><div class="canvas-footer"><button id="grow-page" disabled><svg class="icon" aria-hidden="true"><use href="#i-chevrons-down"/></svg>ページを下に伸ばす</button><span id="page-size"></span></div>
+ <aside id="layer-panel" class="layer-panel" aria-label="レイヤー" hidden>
+  <div class="layer-head" id="layer-head"><span class="layer-title"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg>レイヤー <span id="layer-count"></span></span><span class="layer-head-tip">ここをドラッグで移動</span><button type="button" id="layer-collapse" class="icon-only" aria-label="レイヤー一覧を折りたたむ" aria-expanded="true"><svg class="icon" aria-hidden="true"><use href="#i-chevron-up"/></svg></button><button type="button" id="layer-close" class="icon-only" aria-label="レイヤーパネルを閉じる"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="layer-body" id="layer-body">
+   <div id="layer-list" class="layer-list" role="listbox" aria-label="レイヤー一覧（上の行ほど手前）"></div>
+   <div class="layer-tools">
+    <button type="button" id="layer-add" disabled title="新しいレイヤーを追加"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>追加</button>
+    <button type="button" id="layer-rename" disabled title="選んだレイヤーの名前を変更"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>名前</button>
+    <button type="button" id="layer-delete" disabled title="選んだレイヤーを削除（2回押し）"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="layer-delete-label">削除</span></button>
+   </div>
+   <label class="layer-opacity"><span>不透明度</span><input type="range" id="layer-opacity" min="0" max="100" value="100" disabled><output id="layer-opacity-value" for="layer-opacity">100%</output></label>
+   <p class="layer-tip">選んだ行のレイヤーに手書きが入ります。目のアイコンで表示/非表示、鍵でロック。行をドラッグで並べ替え（上ほど手前）。文字と画像はレイヤーの下に置かれます。</p>
+  </div>
+ </aside>
+ <details class="help"><summary>はじめての使い方・保存について</summary><ol><li>左の「＋ ページを追加」を押し、ページの名前を入れて「作成」します。空欄のまま作成すると「名称未設定」になります（カテゴリも同じ）。</li><li>画面上の「ページ」で一覧を開閉できます。「表示」で倍率を選べます。「閲覧」を押すと指でページ内をスクロールでき、「編集に戻る」で再開します。「テキスト」を選び、白いページの好きな場所をクリックすると入力欄が出ます。文字を打ち込んでください。</li><li>文字をドラッグで選んでから、テキストを選んだときの書式欄にある「太字」「A−／A+」「小／標準／大／特大」「文字の色」を押すと、その部分だけに効きます。何も選んでいなければ入力欄全体に効きます。「罫線を挿入」はカーソルの位置に横線を入れます。</li><li>「ペン」で手書きします。カーソルは線の太さの円になり、筆圧に合わせて大きさが変わります。テキストモードのままでも、ペン（スタイラス）で触れた場所は手書きになります。</li><li>手書きはページ右の「レイヤー」パネルで層に分けられます（最大10枚）。「＋ 追加」で新しい層、行をクリックで書き込む層を選択、👁で表示/非表示、🔒でロック、「不透明度」で薄く表示、行のドラッグで前後の順番を変更、「✎ 名前」で名前、「× 削除」（2回押し）で削除できます。パネルは上の帯をドラッグして好きな場所に置けます。</li><li>「消しゴム」は「なぞった部分」だけを消す方式と、「線ごと」消す方式を選べます。「大きさ」で消しゴムの太さを 1 まで細くできます。</li>
+<li>「選択/移動」では、手書きをドラッグで囲んで選び、そのまま動かせます。「四角で囲む」は触れた線をまるごと、「投げ縄」は囲んだ部分だけを切り出して選びます。文字や画像はクリックで選びます。矢印キーで少しずつ動かせ（Shift で大きく）、Delete で削除できます。</li>
+<li>左の「このページをSVGで書き出す」で、いま開いているページを Illustrator や Inkscape で開いて編集できる SVG ファイルにできます。レイヤーごとにグループ分けされ、筆圧のある線は塗りの図形、それ以外は線として入ります。</li><li>左の「＋ カテゴリを追加」で新しいカテゴリ（OneNoteのセクションに相当）を作れます。ページの「カテゴリ」欄に名前を入れても分類できます。見出しをクリックすると折りたためます。</li>
+<li>左のページ名やカテゴリ見出しは、マウスでドラッグして並べ替えできます。ページを別のカテゴリの見出しに落とすと、そのカテゴリへ移動します。</li>
+<li>ページ名やカテゴリ見出しの右に出る「⋯」（または右クリック）から「名前の変更」「ゴミ箱へ移動」ができます。削除したものは左下の「ゴミ箱」に入り、そこで「元に戻す」か「完全に削除」を選ぶまで消えません。</li><li>「画像を追加」、またはコピーした画像を Ctrl+V、画像ファイルをページへドロップすると貼り付きます。</li><li>入力欄や画像の上に出る「移動」をドラッグすると動かせます。右下の角で大きさを変えられます。「×」で削除します。</li><li>「↶」で元に戻せます（手書き・文字・画像・移動）。</li><li>左の「＋ ページを追加」で新しいページを作れます。右上が「保存済み」になったら、このタブを閉じられます。</li></ol>
+ <p>保存先は、このPC・このブラウザの内部です。別のブラウザには共有されません。ブラウザのデータ削除で消えるため、バックアップをご利用ください。読み込みは既存ページに追加します。</p>
+ <p>手のひらの誤描画を防ぐため、指では書けません。指はスクロールと「移動」の操作に使えます。筆圧は機器がブラウザに伝える場合に反映します。iPad実機の確認は次段階です。</p></details>
+ <footer>余白ノート <span>YOUR SPACE, YOUR NOTES</span></footer>
+ </section>
+</main>
+</div>
+</body></html>

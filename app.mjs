@@ -157,7 +157,7 @@ function uniqueCategoryName(base=DEFAULT_NAME) {
  return name;
 }
 function showForm(mode,title,value,submitLabel) {
- formMode=mode;$('form-title').textContent=title;$('form-submit').textContent=submitLabel;
+ formMode=mode;$('form-title').textContent=title;$('form-submit-label').textContent=submitLabel;
  const forPage=mode.kind==='rename-page'||mode.kind==='new-page';
  $('new-category-name').placeholder=forPage?'ページの名前（空欄なら「'+DEFAULT_NAME+'」）':'カテゴリ名（空欄なら「'+DEFAULT_NAME+'」）';$('new-category-name').maxLength=forPage?120:60;
  $('new-category').hidden=false;$('new-category-name').value=value;$('new-category-name').focus();$('new-category-name').select();
@@ -293,6 +293,10 @@ const VIEW_MARGIN=300;
 // machines whose browser rasterises the canvas in software (seen as pen lag on a Surface Pro).
 let quality='normal';try{quality=localStorage.getItem('yohaku-quality')==='light'?'light':'normal';}catch{}
 const qualityLimits=()=>quality==='light'?{dpr:1,pixels:2.5e6}:{dpr:3,pixels:8e6};
+// UI size (text and buttons of the chrome, not the page content). Default: 大きめ.
+let uiSize='large';try{const v=localStorage.getItem('yohaku-ui-size');if(['normal','large','xlarge'].includes(v))uiSize=v;}catch{}
+document.body.dataset.ui=uiSize;$('ui-size').value=uiSize;
+$('ui-size').onchange=e=>{uiSize=e.target.value;document.body.dataset.ui=uiSize;try{localStorage.setItem('yohaku-ui-size',uiSize);}catch{}layout();};
 $('view-quality').value=quality;
 $('view-quality').onchange=e=>{quality=e.target.value==='light'?'light':'normal';try{localStorage.setItem('yohaku-quality',quality);}catch{}updateViewportCanvas(true);message(quality==='light'?'描画を「軽い」にしました。手書きの解像度を下げて、ペンの遅れを減らします。':'描画を「標準」に戻しました。');};
 let inkView={top:0,bottom:0,k:1},viewRaf=0;
@@ -996,7 +1000,11 @@ layerList.addEventListener('drop',e=>{
 // panel: collapse and drag anywhere on screen; position is remembered per browser
 function savePanelState(){try{localStorage.setItem('yohaku-layer-panel',JSON.stringify({left:layerPanel.style.left,top:layerPanel.style.top,collapsed:layerPanel.classList.contains('collapsed')}));}catch{}}
 function placePanel(x,y){x=clamp(x,0,Math.max(0,innerWidth-layerPanel.offsetWidth));y=clamp(y,0,Math.max(0,innerHeight-44));layerPanel.style.left=Math.round(x)+'px';layerPanel.style.top=Math.round(y)+'px';layerPanel.style.right='auto';}
-try{const st=JSON.parse(localStorage.getItem('yohaku-layer-panel')||'null');if(st){if(st.left&&st.top)placePanel(parseFloat(st.left),parseFloat(st.top));if(st.collapsed)layerPanel.classList.add('collapsed');}}catch{}
+let panelPlaced=false;
+try{const st=JSON.parse(localStorage.getItem('yohaku-layer-panel')||'null');if(st){if(st.left&&st.top){placePanel(parseFloat(st.left),parseFloat(st.top));panelPlaced=true;}if(st.collapsed)layerPanel.classList.add('collapsed');}}catch{}
+// First run on a wide screen: put the panel beside the page, below the toolbar, so it never
+// covers the tool buttons. The user can drag it anywhere afterwards.
+function placePanelDefault(){if(panelPlaced||innerWidth<=1180||layerPanel.hidden)return;const r=paper.getBoundingClientRect();placePanel(innerWidth-layerPanel.offsetWidth-24,Math.max(80,r.top+12));panelPlaced=true;}
 $('layer-collapse').onclick=()=>{const c=layerPanel.classList.toggle('collapsed');$('layer-collapse').replaceChildren(icon(c?'chevron-down':'chevron-up'));$('layer-collapse').setAttribute('aria-expanded',String(!c));$('layer-collapse').setAttribute('aria-label',c?'レイヤー一覧を開く':'レイヤー一覧を折りたたむ');savePanelState();};
 if(layerPanel.classList.contains('collapsed')){$('layer-collapse').replaceChildren(icon('chevron-down'));$('layer-collapse').setAttribute('aria-expanded','false');}
 $('layer-head').addEventListener('pointerdown',e=>{
@@ -1207,9 +1215,9 @@ $sync('logout').onclick=async()=>{
 // Offline support + automatic update: a new version published on the server replaces the
 // old one on the next open, without the user clearing site data.
 function setupServiceWorker() {
- let reloading=false;
+ let reloading=false;const hadController=!!navigator.serviceWorker.controller; // first install must not reload or warn
  navigator.serviceWorker.addEventListener('controllerchange',()=>{
-  if(reloading||!navigator.serviceWorker.controller)return;reloading=true;
+  if(reloading||!hadController||!navigator.serviceWorker.controller)return;reloading=true;
   if(dirty||saving){message('新しい版に更新しました。保存が終わったら再読み込みしてください。');return;}
   location.reload();
  });
@@ -1318,13 +1326,14 @@ function initializePresentation(){
  syncNavigation();
  function setLayers(opened,remember=true){
   layerPanel.hidden=!opened;$('layers-toggle').setAttribute('aria-expanded',String(opened));
+  if(opened)placePanelDefault();
   if(opened&&layerPanel.classList.contains('collapsed'))$('layer-collapse').click();
   if(remember)try{localStorage.setItem('yohaku-layers-open',opened?'1':'0');}catch{}
  }
  $('layers-toggle').onclick=()=>setLayers(layerPanel.hidden);
  $('layer-close').onclick=()=>{setLayers(false);$('layers-toggle').focus();};
  let layersPref=null;try{layersPref=localStorage.getItem('yohaku-layers-open');}catch{}
- setLayers(layersPref==='1'||(layersPref===null&&innerWidth>1180),false);
+ setLayers(layersPref==='1'||(layersPref===null&&innerWidth>1180),false);placePanelDefault();
  const zoom=$('view-zoom');
  try{const saved=localStorage.getItem('yohaku-view-zoom');if(['fit','.75','1','1.25'].includes(saved))zoom.value=saved;}catch{}
  function applyZoom(){

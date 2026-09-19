@@ -466,3 +466,73 @@ body.ios .sheet.select .block{touch-action:none}
 .sheet.ink,.sheet.select{touch-action:pan-x pan-y pinch-zoom}
 .sheet.ink.pen-near,.sheet.select.pen-near{touch-action:none}
 .sheet.select .block{touch-action:none}
+
+/* ---------- readability: larger text, buttons and icons; three sizes via body[data-ui] ---------- */
+:root{--ui-fs:15px;--ui-fs-sm:13px;--ui-fs-lg:17px;--ui-icon:20px;--ui-icon-lg:26px;--ui-btn:44px;--ui-title:32px;--rail:300px}
+body[data-ui="large"]{--ui-fs:17px;--ui-fs-sm:15px;--ui-fs-lg:19px;--ui-icon:24px;--ui-icon-lg:30px;--ui-btn:50px;--ui-title:36px;--rail:340px}
+body[data-ui="xlarge"]{--ui-fs:20px;--ui-fs-sm:17px;--ui-fs-lg:22px;--ui-icon:28px;--ui-icon-lg:34px;--ui-btn:56px;--ui-title:40px;--rail:390px}
+body{font-size:var(--ui-fs)}
+body button{font-size:var(--ui-fs);min-height:var(--ui-btn);border-radius:10px}
+body .icon{width:var(--ui-icon);height:var(--ui-icon)}
+body .modes button{font-size:var(--ui-fs-lg);font-weight:700;padding:8px 18px;min-height:var(--ui-btn)}
+body .modes .icon{width:var(--ui-icon-lg);height:var(--ui-icon-lg)}
+body .sub-options button{font-size:var(--ui-fs)}
+body .tool-group label,body .check-label,body .group-label{font-size:var(--ui-fs-sm);letter-spacing:0}
+body .group-label .icon{width:var(--ui-icon);height:var(--ui-icon)}
+body input[type=checkbox]{width:22px;height:22px;vertical-align:-5px;margin-right:4px}
+body input[type=range]{width:120px;height:30px}
+body #width-value,body #eraser-size-value,body #layer-opacity-value{font-size:var(--ui-fs-sm);width:2.2em}
+body .tool-group .swatch{width:30px;height:30px}
+body .colors input,body .fmt-colors input{width:30px;height:30px}
+body .fmt-colors .fmt-color{width:24px;height:24px}
+body .sizes .fmt-size{font-size:var(--ui-fs-sm)}
+body .fmt-hint,body .paper-caption,body .canvas-footer,body .list-tip,body .layer-tip,body .view-note,body .sidebar-bottom .small,body .sync-tools .small{font-size:var(--ui-fs-sm)}
+body .view-actions select,body .page-meta input,body #sync-form input,body .new-category input,body .layer-row input{font-size:var(--ui-fs);min-height:var(--ui-btn);padding:6px 10px}
+body .view-actions label{font-size:var(--ui-fs-sm);display:inline-flex;align-items:center;gap:4px}
+body .page-meta{font-size:var(--ui-fs-sm)}
+body #page-title{font-size:var(--ui-title)}
+body .topbar{font-size:var(--ui-fs-sm);height:auto;min-height:72px}
+body #save-status,body .sync-status{font-size:var(--ui-fs-sm)}
+body .message{font-size:var(--ui-fs)}
+/* sidebar */
+body .sidebar{width:var(--rail)}
+body .brand h1{font-size:calc(var(--ui-fs) + 8px)}
+body .notebook-name{font-size:var(--ui-fs-sm)}
+body .list-heading{font-size:var(--ui-fs-sm);display:flex;align-items:center;gap:4px}
+body .list-heading .icon{width:var(--ui-icon);height:var(--ui-icon)}
+body .page-button{font-size:var(--ui-fs);padding:12px 14px;min-height:var(--ui-btn)}
+body .page-button small{font-size:var(--ui-fs-sm);margin-left:calc(var(--ui-icon) + 7px)}
+body .category-heading{font-size:var(--ui-fs);min-height:calc(var(--ui-btn) - 8px)}
+body .category-heading .icon{width:var(--ui-icon);height:var(--ui-icon)}
+body .item-menu-button{min-height:auto;width:36px;height:36px;top:8px;right:8px}
+body .item-menu-button .icon{width:var(--ui-icon);height:var(--ui-icon)}
+body .item-menu button{font-size:var(--ui-fs);min-height:var(--ui-btn)}
+body .sidebar-bottom button,body .secondary,body .trash-toggle,body #sync-logout,body #sync-form button,body .new-category button{font-size:var(--ui-fs);min-height:var(--ui-btn)}
+body .sync-tools summary{font-size:var(--ui-fs);min-height:var(--ui-btn)}
+body .sync-badge{font-size:var(--ui-fs-sm)}
+body .link-button{font-size:var(--ui-fs-sm);min-height:auto;display:inline-flex;gap:4px}
+body .form-title{font-size:var(--ui-fs)}
+body .trash-item{font-size:var(--ui-fs)}
+body .trash-item small{font-size:var(--ui-fs-sm)}
+body .trash-item button,body .trash-back,body .trash-clear{font-size:var(--ui-fs-sm);min-height:var(--ui-btn)}
+/* layer panel */
+body .layer-panel{font-size:var(--ui-fs);width:calc(var(--rail) - 20px)}
+body .layer-title{font-size:var(--ui-fs)}
+body .layer-row{min-height:var(--ui-btn);font-size:var(--ui-fs)}
+body .layer-row button{min-height:auto}
+body .layer-row button .icon{width:var(--ui-icon);height:var(--ui-icon)}
+body .layer-op{font-size:var(--ui-fs-sm);width:3em}
+body .layer-tools button{font-size:var(--ui-fs-sm)}
+body .layer-opacity{font-size:var(--ui-fs-sm)}
+/* small controls that must stay compact */
+body .block-bar button,body .resize,body #layer-collapse,body #layer-close,body .cat-remove{min-height:auto}
+body .block-bar button{font-size:var(--ui-fs-sm);padding:4px 9px}
+body .block-bar .icon{width:16px;height:16px}
+body .help{font-size:var(--ui-fs-sm)}
+body .empty-hint strong{font-size:calc(var(--ui-fs) + 6px)}
+body .empty-hint small{font-size:var(--ui-fs-sm)}
+@media(max-width:1180px){body .sidebar{width:min(var(--rail),88vw)}body .layer-panel{width:min(calc(var(--rail) - 20px),calc(100vw - 28px))}}
+@media(max-width:700px){body .modes button{padding:8px 10px;font-size:var(--ui-fs)}body .modes .icon{width:var(--ui-icon);height:var(--ui-icon)}}
+
+/* narrow screens: let tool groups wrap instead of overflowing the page */
+@media(max-width:700px){body .tool-group,body .text-tools,body .view-actions,body .view-strip{flex-wrap:wrap}body .toolbar,body .text-tools,body .tool-group{max-width:100%;overflow:hidden}body #fmt-color-clear,body .sizes .fmt-size{padding:6px 8px}}

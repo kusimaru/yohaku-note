@@ -825,6 +825,12 @@ async function importFromOekaki(force=false) {
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)importFromOekaki();});
 window.addEventListener('focus',()=>importFromOekaki());
+// 診断: ?diag を付けて開くと、受け取り機能の状態を表示する
+async function oekakiDiag(){
+ let n='?';try{const idb=await openOekakiInbox();n=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').count();q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});idb.close();}catch(e){n='エラー '+e.message;}
+ const ua=/Edg\//.test(navigator.userAgent)?'Edge':/Chrome\//.test(navigator.userAgent)?'Chrome':/Safari\//.test(navigator.userAgent)?'Safari':'その他';
+ message('【診断】受け取り機能: 有効(版 3) / ブラウザ: '+ua+' / アプリ表示: '+(isStandaloneApp()?'はい':'いいえ')+' / 受け渡し箱の画像: '+n+' 枚');
+}
 // ---- pointer handling on the sheet ----
 sheet.tabIndex=-1;
 // Pen proximity: while a pen hovers over or touches the page, mark the sheet so CSS turns off
@@ -1379,6 +1385,7 @@ async function start() {
   if('serviceWorker' in navigator)setupServiceWorker();
   syncBoot();
   importFromOekaki();
+  if(new URLSearchParams(location.search).has('diag'))oekakiDiag();
  }catch(error){
   message('メモを開けませんでした。元の保存データを上書きせず停止しています。ブラウザの保存設定を確認し、再読み込みしてください。 '+error.message);
   setStatus('読み込み停止',true);

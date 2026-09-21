@@ -131,7 +131,7 @@ function sortedPages(sectionId) {
 function renderPageList() {
  const cur=currentSection(),head=$('current-section');head.replaceChildren();head.style.setProperty('--sec',cur.color);
  const nb=notebookOf(doc,cur.notebookId);head.append(icon('section','sec-icon'),el('span','',(nb?nb.name+' › ':'')+cur.name));
- const list=sortedPages(cur.id),box=$('pages');
+ const list=sortedPages(cur.id),box=$('pages');box.replaceChildren();// the list is rebuilt from scratch (the sort button calls this directly)
  for(const pg of list){
   const button=el('button','page-button'+(pg.id===doc.activeId?' active':''));button.type='button';button.dataset.pageId=pg.id;button.draggable=true;button.setAttribute('aria-current',pg.id===doc.activeId?'page':'false');
   const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(icon('page'),label);button.append(name);
@@ -755,16 +755,7 @@ $('add-image').onclick=()=>{$('image-file').value='';$('image-file').click();};
 $('image-file').onchange=e=>{const files=[...e.target.files];if(files.length)insertImages(files,null);};
 document.addEventListener('paste',e=>{
  if(!ready)return;const files=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
- if(!files.length)return;e.preventDefault();
- // お絵かきツールがクリップボードに入れた画像(text/plain に印がある)は「データ受け取り › お絵かきツール」の新しいページへ
- const tag=(e.clipboardData?.getData('text/plain')||'').trim();
- if(tag.startsWith('oekaki-tool:')){
-  const name=(tag.slice('oekaki-tool:'.length).trim()||'お絵かき').slice(0,100);
-  if(document.body.classList.contains('reading')){message('画像を貼るには「編集に戻る」を押してください。');return;}
-  const sec=receiveSection();if(sec&&createPageIn(sec.id,name))insertImages(files.map(f=>new File([f],name+'.png',{type:f.type})),null).then(()=>message('お絵かきツールの画像を「'+RECEIVE_NOTEBOOK+' › '+RECEIVE_SECTION+'」に保存しました。'));
-  return;
- }
- insertImages(files,null);
+ if(!files.length)return;e.preventDefault();insertImages(files,null);
 });
 window.addEventListener('dragover',e=>e.preventDefault());
 window.addEventListener('drop',e=>{
@@ -772,131 +763,6 @@ window.addEventListener('drop',e=>{
  const files=[...(e.dataTransfer?.files||[])].filter(f=>f.type.startsWith('image/'));if(!files.length)return;
  const inside=sheet.contains(e.target);insertImages(files,inside?coordinates(e):null);
 });
-// ---- お絵かきツールからの受け取り ----
-// 同じ kusimaru.github.io 上の「お絵かきツール」が、共有の IndexedDB('oekaki-share' / 'inbox')に
-// 描いた絵(PNG の data URL)を置く。起動時と画面に戻ったときに取り出して、今のページに画像として貼る。
-function openOekakiInbox(){return new Promise((resolve,reject)=>{
- const r=indexedDB.open('oekaki-share',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('inbox'))r.result.createObjectStore('inbox',{keyPath:'id'});};
- r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
-});}
-const RECEIVE_NOTEBOOK='データ受け取り',RECEIVE_SECTION='お絵かきツール';
-function receiveSection(){
- let nb=doc.notebooks.find(n=>n.name===RECEIVE_NOTEBOOK);if(!nb)nb=addNotebook(doc,RECEIVE_NOTEBOOK);
- let sec=sectionsIn(doc,nb.id).find(x=>x.name===RECEIVE_SECTION);if(!sec)sec=addSection(doc,nb.id,RECEIVE_SECTION);
- return sec;
-}
-let importingOekaki=false;
-// アプリ版(ホーム画面 / インストール済み = standalone 表示)だけが自動で受け取る。
-// ブラウザのタブで開いている場合は、届いていることだけ知らせ、ボタンを押したときに受け取る
-const isStandaloneApp=()=>window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-async function importFromOekaki(force=false) {
- if(!ready||importingOekaki)return;importingOekaki=true;
- try{
-  const idb=await openOekakiInbox();
-  const items=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error);});
-  if(!items.length){idb.close();return;}
-  if(!force&&!isStandaloneApp()){
-   idb.close();
-   message('お絵かきツールから画像が'+items.length+'枚届いています。アプリ版の余白ノートを開くと自動で受け取ります。');
-   const b=document.createElement('button');b.textContent='このページ(ブラウザ版)で受け取る';b.onclick=()=>importFromOekaki(true);$('message').append(' ',b);
-   return;
-  }
-  if(document.body.classList.contains('reading')){idb.close();message('お絵かきツールから画像が届いています。「編集に戻る」を押すと貼り付けます。');return;}
-  // data URL は CSP で fetch できないことがあるので自前で復号する
-  const files=[],done=[];
-  for(const it of items){
-   try{
-    const m=/^data:(image\/[a-z]+);base64,(.*)$/s.exec(it.src||'');if(!m)throw new Error('bad data url');
-    const bin=atob(m[2]),u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-    files.push(new File([u8],(it.name||'お絵かき')+'.png',{type:m[1]}));done.push(it.id);
-   }catch(e){console.warn('oekaki inbox item',e);done.push(it.id);}
-  }
-  // ノートブック「データ受け取り」› セクション「お絵かきツール」に、絵ごとに新しいページを作って貼る
-  for(const f of files){
-   const sec=receiveSection();if(!sec)break;
-   const pg=createPageIn(sec.id,f.name.replace(/\.png$/,''));if(!pg)break;
-   await insertImages([f],null);
-  }
-  await new Promise((res,rej)=>{const tx=idb.transaction('inbox','readwrite');for(const id of done)tx.objectStore('inbox').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
-  idb.close();
-  message('お絵かきツールから画像を'+files.length+'枚受け取り、「'+RECEIVE_NOTEBOOK+' › '+RECEIVE_SECTION+'」に保存しました。');
- }catch(e){console.warn('oekaki inbox',e);}
- finally{importingOekaki=false;}
-}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)importFromOekaki();});
-window.addEventListener('focus',()=>importFromOekaki());
-// ---- お絵かきツールから GitHub 経由で受け取る ----
-// iPad のホーム画面アプリなどブラウザの保存領域を共有できない場合のため、お絵かきツールと同じ GitHub リポジトリの
-// `_yohaku-inbox/` フォルダに置かれた PNG を取りに行き、取り込んだら削除する。
-const OEKAKI_GH_KEY='yohaku-oekaki-github',OEKAKI_DONE_KEY='yohaku-oekaki-done',OEKAKI_INBOX='_yohaku-inbox/';
-function oekakiGhConfig(){try{return JSON.parse(localStorage.getItem(OEKAKI_GH_KEY)||'null');}catch{return null;}}
-function oekakiDone(){try{return new Set(JSON.parse(localStorage.getItem(OEKAKI_DONE_KEY)||'[]'));}catch{return new Set();}}
-function saveOekakiDone(set){try{localStorage.setItem(OEKAKI_DONE_KEY,JSON.stringify([...set].slice(-200)));}catch{}}
-async function ghApi(cfg,path,init={}) {
- const method=(init.method||'GET').toUpperCase();
- const url='https://api.github.com'+path+(method==='GET'?(path.includes('?')?'&':'?')+'_='+Date.now():'');
- const r=await fetch(url,{...init,cache:'no-store',headers:{Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(init.body?{'Content-Type':'application/json'}:{})}});
- if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('GitHub '+r.status+(r.status===401?'（トークンが違うか期限切れ）':r.status===404?'（リポジトリ名かオーナー名が違うか、権限なし）':'')+' '+t.slice(0,80));}
- return r.status===204?null:r.json();
-}
-function updateOekakiBadge(){const cfg=oekakiGhConfig();const b=$('oekaki-badge');if(b){b.textContent=cfg&&cfg.token?'オン':'オフ';b.className='sync-badge '+(cfg&&cfg.token?'on':'');}}
-let fetchingOekaki=false,lastOekakiFetch=0;
-async function fetchOekakiFromGitHub(manual=false) {
- const cfg=oekakiGhConfig();if(!ready||fetchingOekaki||!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
- if(!manual&&Date.now()-lastOekakiFetch<30000)return;
- lastOekakiFetch=Date.now();fetchingOekaki=true;
- const st=$('oekaki-status');const say=t=>{if(st)st.textContent=t;};
- try{
-  if(manual)say('GitHub を確認中…');
-  const base='/repos/'+encodeURIComponent(cfg.owner)+'/'+encodeURIComponent(cfg.repo),branch=cfg.branch||'main';
-  const head=(await ghApi(cfg,base+'/git/ref/heads/'+encodeURIComponent(branch))).object.sha;
-  const commit=await ghApi(cfg,base+'/git/commits/'+head);
-  const tree=await ghApi(cfg,base+'/git/trees/'+commit.tree.sha+'?recursive=1');
-  const files=tree.tree.filter(i=>i.type==='blob'&&i.path.startsWith(OEKAKI_INBOX)&&/\.png$/i.test(i.path)).sort((a,b)=>a.path.localeCompare(b.path));
-  if(!files.length){if(manual)say('GitHub に新しい画像はありません（'+new Date().toLocaleTimeString()+'）');return;}
-  if(document.body.classList.contains('reading')){message('お絵かきツールから画像が届いています。「編集に戻る」を押すと貼り付けます。');return;}
-  const done=oekakiDone();let count=0;
-  for(const f of files){
-   if(done.has(f.path))continue; // 前回取り込み済みだが削除に失敗したもの
-   const blob=await ghApi(cfg,base+'/git/blobs/'+f.sha);
-   const bin=atob(blob.content.replace(/\n/g,''));const u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-   const name=(f.path.slice(OEKAKI_INBOX.length).replace(/^\d+-/,'').replace(/\.png$/i,'')||'お絵かき').slice(0,100);
-   const sec=receiveSection();if(!sec)break;const pg=createPageIn(sec.id,name);if(!pg)break;
-   await insertImages([new File([u8],name+'.png',{type:'image/png'})],null);
-   done.add(f.path);saveOekakiDone(done);count++;
-  }
-  // 取り込んだファイルを GitHub から消す（同時に別のコミットが入っていたら次回に持ち越す）
-  try{
-   const newTree=await ghApi(cfg,base+'/git/trees',{method:'POST',body:JSON.stringify({base_tree:commit.tree.sha,tree:files.map(f=>({path:f.path,mode:'100644',type:'blob',sha:null}))})});
-   const c2=await ghApi(cfg,base+'/git/commits',{method:'POST',body:JSON.stringify({message:'yohaku-note received '+files.length+' image(s)',tree:newTree.sha,parents:[head]})});
-   await ghApi(cfg,base+'/git/refs/heads/'+encodeURIComponent(branch),{method:'PATCH',body:JSON.stringify({sha:c2.sha,force:false})});
-   const d=oekakiDone();for(const f of files)d.delete(f.path);saveOekakiDone(d);
-  }catch(e){console.warn('inbox cleanup',e);}
-  if(count){message('お絵かきツールから画像を'+count+'枚受け取り、「'+RECEIVE_NOTEBOOK+' › '+RECEIVE_SECTION+'」に保存しました。');say('受け取り: '+count+'枚（'+new Date().toLocaleTimeString()+'）');}
-  else if(manual)say('新しい画像はありません');
- }catch(e){console.warn('oekaki github',e);if(manual)say('受け取りに失敗: '+e.message);}
- finally{fetchingOekaki=false;}
-}
-function setupOekakiGitHub(){
- const cfg=oekakiGhConfig()||{};
- $('oekaki-token').value=cfg.token||'';$('oekaki-owner').value=cfg.owner||'';$('oekaki-repo').value=cfg.repo||'';$('oekaki-branch').value=cfg.branch||'main';
- $('oekaki-save').onclick=()=>{
-  const c={token:$('oekaki-token').value.trim(),owner:$('oekaki-owner').value.trim(),repo:$('oekaki-repo').value.trim(),branch:$('oekaki-branch').value.trim()||'main'};
-  try{localStorage.setItem(OEKAKI_GH_KEY,JSON.stringify(c));}catch{}
-  updateOekakiBadge();$('oekaki-status').textContent=c.token?'保存しました。確認しています…':'設定を消しました';
-  if(c.token)fetchOekakiFromGitHub(true);
- };
- $('oekaki-fetch').onclick=()=>fetchOekakiFromGitHub(true);
- updateOekakiBadge();
-}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)fetchOekakiFromGitHub();});
-window.addEventListener('focus',()=>fetchOekakiFromGitHub());
-// 診断: ?diag を付けて開くと、受け取り機能の状態を表示する
-async function oekakiDiag(){
- let n='?';try{const idb=await openOekakiInbox();n=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').count();q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});idb.close();}catch(e){n='エラー '+e.message;}
- const ua=/Edg\//.test(navigator.userAgent)?'Edge':/Chrome\//.test(navigator.userAgent)?'Chrome':/Safari\//.test(navigator.userAgent)?'Safari':'その他';
- message('【診断】受け取り機能: 有効(版 3) / ブラウザ: '+ua+' / アプリ表示: '+(isStandaloneApp()?'はい':'いいえ')+' / 受け渡し箱の画像: '+n+' 枚');
-}
 // ---- pointer handling on the sheet ----
 sheet.tabIndex=-1;
 // Pen proximity: while a pen hovers over or touches the page, mark the sheet so CSS turns off
@@ -1450,9 +1316,6 @@ async function start() {
   if(saved&&saved.version!==1)setStatus('保存済み');else changed();
   if('serviceWorker' in navigator)setupServiceWorker();
   syncBoot();
-  importFromOekaki();
-  setupOekakiGitHub();fetchOekakiFromGitHub();
-  if(new URLSearchParams(location.search).has('diag'))oekakiDiag();
  }catch(error){
   message('メモを開けませんでした。元の保存データを上書きせず停止しています。ブラウザの保存設定を確認し、再読み込みしてください。 '+error.message);
   setStatus('読み込み停止',true);

@@ -177,7 +177,7 @@ export function ensureStructure(doc) {
  if(!Array.isArray(doc.notebooks)||!doc.notebooks.length){doc.notebooks=[{id:DEFAULT_NOTEBOOK_ID,name:'わたしのノート',color:pickColor(0)}];changed=true;}
  if(!Array.isArray(doc.sections)){doc.sections=[];changed=true;}
  const home=doc.notebooks[0].id,nbIds=new Set(doc.notebooks.map(n=>n.id));
- for(const s of doc.sections)if(!nbIds.has(s.notebookId)){s.notebookId=home;changed=true;}
+ for(const s of doc.sections)if(!nbIds.has(s.notebookId)){doc.notebooks.push({id:s.notebookId,name:'同期待ち',color:pickColor(doc.notebooks.length),placeholder:true,updatedAt:0});nbIds.add(s.notebookId);changed=true;}
  const byId=id=>doc.sections.find(s=>s.id===id);
  const legacy=[...(doc.categories||[]),...doc.pages.map(p=>categoryOf(p))].filter(Boolean);
  for(const name of legacy){
@@ -187,7 +187,7 @@ export function ensureStructure(doc) {
  const memo=()=>{let m=byId('sec:メモ');if(!m){m={id:'sec:メモ',notebookId:home,name:'メモ',color:pickColor(doc.sections.length)};doc.sections.push(m);changed=true;}return m;};
  for(const p of doc.pages){
   if(typeof p.sectionId==='string'&&p.sectionId){
-   if(!byId(p.sectionId)){doc.sections.push({id:p.sectionId,notebookId:home,name:'セクション',color:pickColor(doc.sections.length)});changed=true;}
+   if(!byId(p.sectionId)){doc.sections.push({id:p.sectionId,notebookId:home,name:'同期待ち',color:pickColor(doc.sections.length),placeholder:true,updatedAt:0});changed=true;}
   } else {
    const name=categoryOf(p);
    const sec=name?(byId('sec:'+name)||doc.sections.find(s=>s.notebookId===home&&s.name===name)||memo()):memo();
@@ -199,6 +199,78 @@ export function ensureStructure(doc) {
  if(doc.categories!==undefined){delete doc.categories;changed=true;}
  return changed;
 }
+// ---------- structure sync: per-item "newest wins" merge (notebooks, sections, tombstones, orders) ----------
+// Every notebook/section carries updatedAt (0 = never stamped). doc.removed = {id: deletedAt} tombstones.
+// doc.orderUpdatedAt stamps the three orderings (notebooks, sections, pages) as one unit.
+const HEX=/^#[0-9a-f]{6}$/i;
+const itemKey=x=>JSON.stringify({...x,updatedAt:undefined,placeholder:undefined});
+const cleanNotebook=n=>n&&typeof n.id==='string'&&n.id.length<=100&&typeof n.name==='string'&&n.name.trim()&&HEX.test(n.color||'')?{id:n.id,name:n.name.slice(0,60),color:n.color.toLowerCase(),updatedAt:Number.isFinite(n.updatedAt)?n.updatedAt:0,...(n.placeholder?{placeholder:true}:{})}:null;
+const cleanSection=x=>x&&typeof x.id==='string'&&x.id.length<=100&&typeof x.notebookId==='string'&&typeof x.name==='string'&&x.name.trim()&&HEX.test(x.color||'')?{id:x.id,notebookId:x.notebookId,name:x.name.slice(0,60),color:x.color.toLowerCase(),updatedAt:Number.isFinite(x.updatedAt)?x.updatedAt:0,...(x.placeholder?{placeholder:true}:{})}:null;
+export function removedOf(doc){const out={};const r=doc.removed;if(Array.isArray(r)){for(const e of r)if(e&&typeof e.id==='string'&&Number.isFinite(e.at))out[e.id]=e.at;}else if(r&&typeof r==='object'){for(const [id,at] of Object.entries(r))if(Number.isFinite(at))out[id]=at;}return out;}
+// Which of two same-id versions wins: newer stamp; then a real item over a placeholder; then the larger JSON (deterministic on both devices).
+function better(a,b){
+ if(!a)return b;if(!b)return a;
+ const ta=a.updatedAt||0,tb=b.updatedAt||0;if(ta!==tb)return ta>tb?a:b;
+ if(!!a.placeholder!==!!b.placeholder)return a.placeholder?b:a;
+ return itemKey(a)>=itemKey(b)?a:b;
+}
+function mergeList(local,remote,removed){
+ const ids=[...new Set([...local.map(x=>x.id),...remote.map(x=>x.id)])],out=[];
+ for(const id of ids){
+  const w=better(local.find(x=>x.id===id),remote.find(x=>x.id===id)),dead=removed[id];
+  if(dead!==undefined&&dead>=(w.updatedAt||0))continue; // deleted after its last edit (a later restore re-stamps it)
+  out.push(w);
+ }
+ return out;
+}
+// Order: take the id sequence from the side with the newer orderUpdatedAt (tie: larger JSON), then append the rest.
+function orderBy(items,baseIds,otherIds){
+ const pos=new Map(baseIds.map((id,i)=>[id,i]));const rest=items.filter(x=>!pos.has(x.id));
+ const restPos=new Map(otherIds.map((id,i)=>[id,i]));rest.sort((a,b)=>(restPos.get(a.id)??1e9)-(restPos.get(b.id)??1e9));
+ return [...items.filter(x=>pos.has(x.id)).sort((a,b)=>pos.get(a.id)-pos.get(b.id)),...rest];
+}
+export function structureSig(doc){return JSON.stringify([(doc.notebooks||[]).map(cleanNotebook),(doc.sections||[]).map(cleanSection),Object.entries(removedOf(doc)).sort(),doc.pages.map(p=>p.id)]);}
+export function mergeStructure(doc,remote) {
+ ensureStructure(doc);
+ const before=structureSig(doc);
+ const rNotebooks=(Array.isArray(remote.notebooks)?remote.notebooks:[]).map(cleanNotebook).filter(Boolean);
+ const rSections=(Array.isArray(remote.sections)?remote.sections:[]).map(cleanSection).filter(Boolean);
+ const removed=removedOf(doc),rRemoved=removedOf(remote);
+ for(const [id,at] of Object.entries(rRemoved))if(!(removed[id]>=at))removed[id]=at;
+ const localNb=(doc.notebooks||[]).map(cleanNotebook).filter(Boolean),localSec=(doc.sections||[]).map(cleanSection).filter(Boolean);
+ let notebooks=mergeList(localNb,rNotebooks,removed),sections=mergeList(localSec,rSections,removed);
+ const lo=doc.orderUpdatedAt||0,ro=remote.orderUpdatedAt||0;
+ const rOrder=Array.isArray(remote.order)?remote.order.filter(x=>typeof x==='string'):[];
+ const remoteWins=ro>lo||(ro===lo&&JSON.stringify([rNotebooks.map(x=>x.id),rSections.map(x=>x.id),rOrder])>JSON.stringify([localNb.map(x=>x.id),localSec.map(x=>x.id),doc.pages.map(x=>x.id)]));
+ const base=remoteWins?{nb:rNotebooks.map(x=>x.id),sec:rSections.map(x=>x.id),pg:rOrder}:{nb:localNb.map(x=>x.id),sec:localSec.map(x=>x.id),pg:doc.pages.map(x=>x.id)};
+ const other=remoteWins?{nb:localNb.map(x=>x.id),sec:localSec.map(x=>x.id),pg:doc.pages.map(x=>x.id)}:{nb:rNotebooks.map(x=>x.id),sec:rSections.map(x=>x.id),pg:rOrder};
+ notebooks=orderBy(notebooks,base.nb,other.nb);sections=orderBy(sections,base.sec,other.sec);
+ doc.notebooks=notebooks;doc.sections=sections;doc.removed=removed;doc.orderUpdatedAt=Math.max(lo,ro);
+ doc.pages=orderBy(doc.pages,base.pg,other.pg);
+ // keep the tombstone list bounded
+ const entries=Object.entries(removed);if(entries.length>1000){entries.sort((a,b)=>b[1]-a[1]);doc.removed=Object.fromEntries(entries.slice(0,1000));}
+ ensureStructure(doc);
+ const after=structureSig(doc);
+ const remoteSig=JSON.stringify([rNotebooks,rSections,Object.entries(rRemoved).sort(),rOrder]);
+ return {localChanged:before!==after,remoteDiffers:after!==remoteSig};
+}
+// Called after local edits: stamps items that changed since `prev` (a snapshot from a previous call), records tombstones
+// for items that vanished, and stamps the orderings when they moved. Placeholders created by ensureStructure are not stamped.
+export function observeStructure(doc,prev,now=Date.now()) {
+ ensureStructure(doc);
+ const items=new Map();let changed=false;
+ for(const x of [...doc.notebooks,...doc.sections]){
+  const key=itemKey(x),old=prev?prev.items.get(x.id):undefined;
+  if(old===undefined){if(prev&&!x.placeholder){x.updatedAt=now;changed=true;}}
+  else if(old!==key){x.updatedAt=now;delete x.placeholder;changed=true;}
+  items.set(x.id,itemKey(x));
+ }
+ if(prev){const removed=removedOf(doc);for(const id of prev.items.keys())if(!items.has(id)){removed[id]=now;changed=true;doc.removed=removed;}}
+ const order=JSON.stringify([doc.notebooks.map(x=>x.id),doc.sections.map(x=>x.id),doc.pages.map(x=>x.id)]);
+ if(prev&&prev.order!==order){doc.orderUpdatedAt=now;changed=true;}
+ return {snapshot:{items,order},changed};
+}
+export function structureMeta(doc){return {notebooks:(doc.notebooks||[]).map(cleanNotebook).filter(Boolean),sections:(doc.sections||[]).map(cleanSection).filter(Boolean),removed:Object.entries(removedOf(doc)).map(([id,at])=>({id,at})),order:doc.pages.map(p=>p.id),orderUpdatedAt:doc.orderUpdatedAt||0,updatedAt:doc.metaUpdatedAt||Date.now()};}
 export function addNotebook(doc,name) {
  ensureStructure(doc);
  const nb=newNotebook(name||uniqueName(doc.notebooks.map(n=>n.name),'新しいノートブック'),pickColor(doc.notebooks.length));

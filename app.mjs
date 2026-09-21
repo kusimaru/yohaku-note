@@ -1,4 +1,4 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, ensureStructure, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
@@ -1161,8 +1161,7 @@ $('import-file').onchange=async e=>{
 // ---- cloud sync (see sync.mjs) ----
 let syncEngine=null,syncTransport=null,applyingRemote=false,syncUser=null,syncObserved=null;
 const $sync=id=>$('sync-'+id);
-function syncSignature(){return JSON.stringify([doc.notebooks||[],doc.sections||[],doc.pages.map(p=>p.id)]);}
-function syncSnapshot(){syncObserved={pages:new Set(doc.pages.map(p=>p.id)),trash:new Set((doc.trash||[]).map(t=>t.id)),sig:syncSignature()};}
+function syncSnapshot(){syncObserved={pages:new Set(doc.pages.map(p=>p.id)),trash:new Set((doc.trash||[]).map(t=>t.id)),struct:observeStructure(doc,null).snapshot};}
 // After any local change: pages that appeared/disappeared, trash entries that appeared/disappeared,
 // and layout changes are queued for upload. The changed page itself is marked by changed().
 function syncObserve() {
@@ -1172,9 +1171,9 @@ function syncObserve() {
  for(const id of syncObserved.pages)if(!pages.has(id))syncEngine.removePage(id);
  for(const id of trash)if(!syncObserved.trash.has(id))syncEngine.markTrash(id);
  for(const id of syncObserved.trash)if(!trash.has(id))syncEngine.removeTrash(id);
- const sig=syncSignature();
- if(sig!==syncObserved.sig){doc.metaUpdatedAt=Date.now();syncEngine.markNotebook();}
- syncObserved={pages,trash,sig};
+ const st=observeStructure(doc,syncObserved.struct);
+ if(st.changed){doc.metaUpdatedAt=Date.now();syncEngine.markNotebook();}
+ syncObserved={pages,trash,struct:st.snapshot};
 }
 {const box=$('sync-tools');try{box.open=localStorage.getItem('yohaku-sync-open')==='1';}catch{}
  box.addEventListener('toggle',()=>{try{localStorage.setItem('yohaku-sync-open',box.open?'1':'0');}catch{}});}
@@ -1221,14 +1220,11 @@ function applyRemoteTrash(id,entry) {
 function applyRemoteNotebook(meta) {
  applyingRemote=true;
  try{
-  const order=Array.isArray(meta.order)?meta.order:[],byId=new Map(doc.pages.map(pg=>[pg.id,pg]));
-  const ordered=order.map(id=>byId.get(id)).filter(Boolean);for(const pg of doc.pages)if(!order.includes(pg.id))ordered.push(pg);
-  doc.pages=ordered;
-  // notebooks/sections: remote wins per id, local-only ones are kept (they may still be waiting for upload)
-  const hex=/^#[0-9a-f]{6}$/i;
-  if(Array.isArray(meta.notebooks)){const remote=meta.notebooks.filter(n=>n&&typeof n.id==='string'&&typeof n.name==='string'&&n.name.trim()&&hex.test(n.color||''));const ids=new Set(remote.map(n=>n.id));doc.notebooks=[...remote.map(n=>({id:n.id,name:n.name.slice(0,60),color:n.color.toLowerCase()})),...(doc.notebooks||[]).filter(n=>!ids.has(n.id))];}
-  if(Array.isArray(meta.sections)){const remote=meta.sections.filter(x=>x&&typeof x.id==='string'&&typeof x.notebookId==='string'&&typeof x.name==='string'&&x.name.trim()&&hex.test(x.color||''));const ids=new Set(remote.map(x=>x.id));doc.sections=[...remote.map(x=>({id:x.id,notebookId:x.notebookId,name:x.name.slice(0,60),color:x.color.toLowerCase()})),...(doc.sections||[]).filter(x=>!ids.has(x.id))];}
-  ensureStructure(doc);doc.metaUpdatedAt=meta.updatedAt||Date.now();revision++;dirty=true;breadcrumb();renderPages();save();
+  // per-item merge: newest version of each notebook/section wins, deletions travel as tombstones,
+  // orderings come from the side that reordered last. Whatever the cloud is still missing is sent back.
+  const r=mergeStructure(doc,meta);
+  if(r.localChanged){revision++;dirty=true;breadcrumb();renderPages();save();}
+  if(r.remoteDiffers&&syncEngine){doc.metaUpdatedAt=Date.now();syncEngine.markNotebook();}
  }finally{applyingRemote=false;syncSnapshot();}
 }
 async function syncBoot() {
@@ -1243,7 +1239,7 @@ async function syncConnect(useFake) {
  try{syncTransport=useFake?createFakeTransport():await createFirebaseTransport();}
  catch(e){syncTransport=null;syncSetStatus(navigator.onLine?'error':'offline',0,e);syncMessage('同期の準備ができませんでした。インターネットに接続して、もう一度お試しください。');return false;}
  syncEngine=createSyncEngine(syncTransport,{
-  getDoc:()=>doc,setStatus:syncSetStatus,applyPage:applyRemotePage,applyTrash:applyRemoteTrash,applyNotebook:applyRemoteNotebook,
+  getDoc:()=>doc,setStatus:syncSetStatus,applyPage:applyRemotePage,applyTrash:applyRemoteTrash,applyNotebook:applyRemoteNotebook,structureMeta,
   isBusy:()=>!!gesture||!!editing||!ready,validatePage:validateRemotePage,validateTrash:validateRemoteTrash
  });
  syncTransport.onAuth(user=>{

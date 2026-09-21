@@ -123,7 +123,7 @@ export function createFakeTransport(base='/__fake-sync') {
 
 // ---------- engine ----------
 // host: {getDoc, setStatus(state,detail), applyPage(id,page|null), applyTrash(id,entry|null),
-//        applyNotebook(meta), isBusy(), validatePage(page), validateTrash(entry)}
+//        applyNotebook(meta), structureMeta(doc), isBusy(), validatePage(page), validateTrash(entry)}
 export function createSyncEngine(transport,host) {
  const pending=new Map();let uid=null,unsubs=[],timer=null,flushing=false,readQueue=[],reading=false,stopped=false;
  const seen={pages:new Set(),trash:new Set()},firstSnapshot={pages:false,trash:false};
@@ -150,7 +150,7 @@ export function createSyncEngine(transport,host) {
      if(e)await transport.write(uid,'trash',id,e,{updatedAt:e.deletedAt||Date.now(),name:e.name||''});
      else await transport.remove(uid,'trash',id,Date.now());
     } else if(kind==='notebook'){
-     await transport.writeMeta(uid,{notebooks:doc.notebooks||[],sections:doc.sections||[],order:doc.pages.map(p=>p.id),updatedAt:doc.metaUpdatedAt||Date.now()});
+     await transport.writeMeta(uid,host.structureMeta(doc));
     }
     pending.delete(key);persist();lastWriteMs=Math.round(performance.now()-t0);
    }
@@ -203,7 +203,8 @@ export function createSyncEngine(transport,host) {
  function onMeta(meta,error) {
   if(error){host.setStatus('error',0,error);return;}
   if(!meta)return;const doc=host.getDoc();
-  if((meta.updatedAt||0)>(doc.metaUpdatedAt||0)&&!pending.has('notebook:'))host.applyNotebook(meta);
+  // always merge (per-item newest wins); a pending local write will carry the merged result
+  host.applyNotebook(meta);
  }
  return {
   markPage:id=>mark('page',id),markTrash:id=>mark('trash',id),markNotebook:()=>mark('notebook'),

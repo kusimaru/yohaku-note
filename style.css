@@ -620,3 +620,24 @@ body .sync-tools summary{font-size:var(--ui-fs-sm);min-height:auto;padding:7px 4
 .sync-who{margin-left:auto;font-weight:400;color:#7e8e7d;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sync-who:empty{display:none}
 .sync-who:not(:empty)+.sync-badge{margin-left:6px}
+
+/* ---------- multi-select in the sidebar (Ctrl/Shift+click, or the 複数選択 switch for touch) ---------- */
+.nav-tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:4px 0 0}
+.nav-tools-tip{font-size:var(--ui-fs-sm);color:#8a948b;margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.multi-toggle{font-size:var(--ui-fs-sm);min-height:36px;padding:4px 10px;background:transparent;border-color:transparent;color:#5f7166;font-weight:600}
+.multi-toggle .icon{width:18px;height:18px}
+.multi-toggle[aria-pressed=true]{background:#dbe7f7;border-color:#b9cdea;color:#254a86}
+.multi-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#e8f0fb;border:1px solid #b9cdea;border-radius:8px;padding:6px 8px;margin:6px 0 2px;font-size:var(--ui-fs-sm)}
+.multi-bar[hidden]{display:none}
+.multi-count{font-weight:700;color:#254a86;flex:1 0 100%}
+.multi-bar select{flex:1;min-width:130px;font-size:var(--ui-fs-sm);min-height:38px;border:1px solid #b9cdea;border-radius:6px;background:#fff;padding:4px 6px}
+.multi-bar select[hidden]{display:none}
+body .multi-bar button{min-height:38px;font-size:var(--ui-fs-sm);padding:4px 9px;background:#fff}
+body .multi-bar button[hidden]{display:none}
+.sel-mark{display:none;flex:none;width:20px;height:20px;border:2px solid #7b8a80;border-radius:5px;background:#fff;align-items:center;justify-content:center;color:#fff}
+.sel-mark .icon{width:14px;height:14px;stroke-width:3;display:none}
+.sidebar.multi .sel-mark,.selected .sel-mark{display:inline-flex}
+.selected .sel-mark{background:#4268b0;border-color:#4268b0}
+.selected .sel-mark .icon{display:block}
+.page-button.selected,.section-tab.selected,.notebook-button.selected{background:#dbe7f7 !important;box-shadow:inset 0 0 0 2px #4268b0}
+.notebook-button.selected .chev{display:none}

@@ -16,6 +16,8 @@ const sheet=$('sheet'),canvas=$('canvas'),ctx=canvas.getContext('2d'),blocksLaye
 let db,doc,ready=false,tool='text',eraserMode='part',eraserSize=8,color='#243c3a',width=4,gesture=null,scale=1,activeBlock=null;
 let selection={strokes:new Set(),blocks:new Set()},selectionLasso=null,arrowBatch=-1e9,selectMode='rect',dragging=null,view='pages',menuTarget=null,formMode=null,clearArmed=-1e9;
 const collapsedNotebooks=new Set();let selectedSectionId=null,lastShownSectionId=null;
+// multi-select: one kind at a time (page | section | notebook); multiMode makes every click toggle (touch/pen)
+let multiMode=false;const multi={kind:null,ids:new Set(),anchor:null};
 let pageSort='manual';try{pageSort=['manual','updated','name'].includes(localStorage.getItem('yohaku-page-sort'))?localStorage.getItem('yohaku-page-sort'):'manual';}catch{}
 let dirty=false,saving=false,revision=0,saveFailed=false,lastInkEnd=-1e9,editing=null,lastPaperWidth=0;
 const histories=new Map();
@@ -90,8 +92,8 @@ function renderPages() {
  $('pages').replaceChildren();closeMenu();ensureStructure(doc);
  $('trash-count').textContent=(doc.trash||[]).length;$('trash-toggle').classList.toggle('active',view==='trash');$('trash-toggle').setAttribute('aria-pressed',String(view==='trash'));
  document.querySelector('.nav-cols').classList.toggle('trash',view==='trash');
- if(view==='trash'){renderTrash();return;}
- renderNotebooks();renderPageList();renderSectionSelect();
+ if(view==='trash'){renderTrash();renderMultiBar();return;}
+ renderNotebooks();renderPageList();renderSectionSelect();renderMultiBar();
 }
 function renderNotebooks() {
  const box=$('notebooks');box.replaceChildren();const cur=currentSection();
@@ -103,16 +105,16 @@ function renderNotebooks() {
   const head=el('div','notebook-head');
   const btn=el('button','notebook-button');btn.type='button';btn.draggable=true;btn.dataset.notebookId=nb.id;btn.setAttribute('aria-expanded',String(open));btn.title='クリックで開閉 / ドラッグで並べ替え';
   const nbIcon=el('span','nb-icon');nbIcon.style.setProperty('--sec',nb.color);
-  btn.append(icon('chevron-down','chev'),nbIcon,el('span','nb-name',nb.name));
-  btn.onclick=()=>{if(collapsedNotebooks.has(nb.id))collapsedNotebooks.delete(nb.id);else collapsedNotebooks.add(nb.id);renderPages();};
+  btn.append(icon('chevron-down','chev'),selMark(),nbIcon,el('span','nb-name',nb.name));if(isSelected('notebook',nb.id))btn.classList.add('selected');
+  btn.onclick=e=>{if(wantsSelect(e)){toggleSelect('notebook',nb.id,e.shiftKey);return;}if(collapsedNotebooks.has(nb.id))collapsedNotebooks.delete(nb.id);else collapsedNotebooks.add(nb.id);renderPages();};
   head.append(btn,menuButton({type:'notebook',id:nb.id,label:nb.name}));wrap.append(head);
   if(open){
    const list=el('div','sections');
    for(const sec of secs){
     const row=el('div','section-row');
     const tab=el('button','section-tab'+(sec.id===cur.id?' active':''));tab.type='button';tab.draggable=true;tab.dataset.sectionId=sec.id;tab.style.setProperty('--sec',sec.color);
-    tab.append(icon('section','sec-icon'),el('span','sec-name',sec.name));tab.title='クリックで開く / ドラッグで並べ替え・移動';
-    tab.onclick=()=>selectSection(sec.id);
+    tab.append(selMark(),icon('section','sec-icon'),el('span','sec-name',sec.name));tab.title='クリックで開く / ドラッグで並べ替え・移動';if(isSelected('section',sec.id))tab.classList.add('selected');
+    tab.onclick=e=>{if(wantsSelect(e)){toggleSelect('section',sec.id,e.shiftKey);return;}selectSection(sec.id);};
     row.append(tab,menuButton({type:'section',id:sec.id,label:sec.name}));list.append(row);
    }
    const add=el('button','add-section-link');add.type='button';add.dataset.notebookId=nb.id;add.append(icon('plus'),'新しいセクション');
@@ -134,9 +136,9 @@ function renderPageList() {
  const list=sortedPages(cur.id),box=$('pages');box.replaceChildren();// the list is rebuilt from scratch (the sort button calls this directly)
  for(const pg of list){
   const button=el('button','page-button'+(pg.id===doc.activeId?' active':''));button.type='button';button.dataset.pageId=pg.id;button.draggable=true;button.setAttribute('aria-current',pg.id===doc.activeId?'page':'false');
-  const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(icon('page'),label);button.append(name);
+  const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(selMark(),icon('page'),label);button.append(name);if(isSelected('page',pg.id))button.classList.add('selected');
   const sub=el('small','',new Date(pg.updatedAt).toLocaleDateString('ja-JP'));button.append(sub);
-  button.onclick=()=>openPage(pg.id);
+  button.onclick=e=>{if(wantsSelect(e)){toggleSelect('page',pg.id,e.shiftKey);return;}openPage(pg.id);};
   const item=el('div','page-item');item.append(button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));box.append(item);
  }
  if(!list.length)box.append(el('div','pages-empty','このセクションにはまだページがありません。「ページの追加」で作れます。'));
@@ -213,6 +215,78 @@ function showForm(mode,title,value,submitLabel) {
  $('new-category-name').placeholder=(forPage?'ページの名前':mode.kind.includes('notebook')?'ノートブックの名前':'セクションの名前')+'（空欄なら「'+DEFAULT_NAME+'」）';$('new-category-name').maxLength=forPage?120:60;
  $('new-category').hidden=false;$('new-category-name').value=value;$('new-category-name').focus();$('new-category-name').select();
 }
+// ---- multi-select ----
+const selMark=()=>{const m=el('i','sel-mark');m.append(icon('check'));return m;};
+const isSelected=(kind,id)=>multi.kind===kind&&multi.ids.has(id);
+const wantsSelect=e=>multiMode||e.ctrlKey||e.metaKey||e.shiftKey;
+// ids of one kind in the order they are shown
+function visibleIds(kind){
+ if(kind==='page')return sortedPages(currentSection().id).map(pg=>pg.id);
+ if(kind==='section'){const out=[];for(const nb of doc.notebooks)for(const sec of sectionsIn(doc,nb.id))out.push(sec.id);return out;}
+ return doc.notebooks.map(nb=>nb.id);
+}
+function toggleSelect(kind,id,range=false){
+ if(multi.kind!==kind){multi.ids.clear();multi.anchor=null;multi.kind=kind;}
+ if(range&&multi.anchor&&multi.anchor!==id){
+  const ids=visibleIds(kind),a=ids.indexOf(multi.anchor),b=ids.indexOf(id);
+  if(a>=0&&b>=0){for(const x of ids.slice(Math.min(a,b),Math.max(a,b)+1))multi.ids.add(x);}else multi.ids.add(id);
+ } else {
+  if(multi.ids.has(id))multi.ids.delete(id);else multi.ids.add(id);multi.anchor=id;
+ }
+ if(!multi.ids.size){multi.kind=null;multi.anchor=null;}
+ renderPages();
+}
+function clearMulti(rerender=true){const had=multi.ids.size>0;multi.kind=null;multi.ids.clear();multi.anchor=null;if(had&&rerender)renderPages();else renderMultiBar();}
+function selectedIds(){ // prune ids that no longer exist, keep display order
+ const kind=multi.kind;if(!kind)return [];
+ const alive=new Set(kind==='page'?doc.pages.map(pg=>pg.id):kind==='section'?doc.sections.map(x=>x.id):doc.notebooks.map(n=>n.id));
+ for(const id of [...multi.ids])if(!alive.has(id))multi.ids.delete(id);
+ const order=kind==='page'?doc.pages.map(pg=>pg.id):visibleIds(kind);
+ return order.filter(id=>multi.ids.has(id));
+}
+function renderMultiBar(){
+ const bar=$('multi-bar'),ids=selectedIds(),kind=multi.kind;
+ if(!ids.length){multi.kind=null;}
+ bar.hidden=!ids.length||view==='trash';
+ $('multi-toggle').setAttribute('aria-pressed',String(multiMode));document.querySelector('.sidebar').classList.toggle('multi',multiMode);
+ if(bar.hidden)return;
+ const label={page:'ページ',section:'セクション',notebook:'ノートブック'}[kind];
+ $('multi-count').textContent=ids.length+'件の'+label+'を選択中';
+ const dest=$('multi-dest');dest.replaceChildren();
+ if(kind==='page'){
+  for(const nb of doc.notebooks){const g=document.createElement('optgroup');g.label=nb.name;for(const sec of sectionsIn(doc,nb.id)){const o=document.createElement('option');o.value=sec.id;o.textContent=sec.name;g.append(o);}dest.append(g);}
+  const cur=currentSection();dest.value=cur.id;
+ } else if(kind==='section'){
+  for(const nb of doc.notebooks){const o=document.createElement('option');o.value=nb.id;o.textContent=nb.name;dest.append(o);}
+  dest.value=currentSection().notebookId;
+ }
+ dest.hidden=kind==='notebook';$('multi-move').hidden=kind==='notebook';
+ $('multi-delete').disabled=kind==='notebook'&&ids.length>=doc.notebooks.length;
+}
+$('multi-toggle').onclick=()=>{multiMode=!multiMode;if(!multiMode)clearMulti(false);renderPages();message(multiMode?'複数選択：ページ・セクション・ノートブックを押すと選べます。もう一度押すと終了。':'複数選択を終了しました。');};
+$('multi-clear').onclick=()=>clearMulti();
+$('multi-move').onclick=()=>{
+ const ids=selectedIds(),kind=multi.kind,to=$('multi-dest').value;if(!ids.length||!to)return;
+ let n=0;
+ if(kind==='page'){for(const id of ids)if(movePage(doc,id,to,null))n++;touchPages(ids);if(ids.includes(doc.activeId)){selectedSectionId=null;breadcrumb();}}
+ else if(kind==='section'){for(const id of ids)if(moveSection(doc,id,to,null))n++;}
+ if(n){changed();}
+ clearMulti(false);renderPages();
+ const where=kind==='page'?sectionOf(doc,to)?.name:notebookOf(doc,to)?.name;message(n+'件を「'+(where||'')+'」へ移動しました。');
+};
+$('multi-delete').onclick=()=>{
+ const ids=selectedIds(),kind=multi.kind;if(!ids.length)return;
+ finish();let n=0,stopped=false;
+ for(const id of ids){
+  const entry=kind==='page'?deletePage(doc,id):kind==='section'?deleteSection(doc,id):deleteNotebook(doc,id);
+  if(!entry){stopped=true;continue;}
+  n++;if(kind==='page')histories.delete(id);
+ }
+ selectedSectionId=null;showPage();changed();clearMulti(false);renderPages();
+ const label={page:'ページ',section:'セクション',notebook:'ノートブック'}[kind];
+ message(n+'件の'+label+'をゴミ箱へ移動しました。'+(stopped?'最後のノートブックは残しました。':'左下の「ゴミ箱」から元に戻せます。'));
+};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&multi.ids.size&&$('item-menu').hidden)clearMulti();},{capture:true});
 // ---- trash view ----
 function renderTrash() {
  const back=document.createElement('button');back.type='button';back.className='trash-back';back.append(icon('back'),'ページ一覧へ戻る');back.onclick=()=>{view='pages';renderPages();};
@@ -249,18 +323,18 @@ function dropTarget(e) {
  const pb=t.closest('.page-button'),st=t.closest('.section-tab'),nh=t.closest('.notebook-head'),pagesCol=t.closest('.nav-pages');
  const half=(node)=>{const r=node.getBoundingClientRect();return e.clientY<r.top+r.height/2?'drop-before':'drop-after';};
  if(dragging.type==='page'){
-  if(pb){if(pb.dataset.pageId===dragging.id)return null;return {mark:pb,cls:half(pb),pageId:pb.dataset.pageId,sectionId:pageById(pb.dataset.pageId)?.sectionId};}
+  if(pb){if(dragging.ids.includes(pb.dataset.pageId))return null;return {mark:pb,cls:half(pb),pageId:pb.dataset.pageId,sectionId:pageById(pb.dataset.pageId)?.sectionId};}
   if(st)return {mark:st,cls:'drop-into',sectionId:st.dataset.sectionId};
   if(pagesCol)return {mark:pagesCol,cls:'drop-into',sectionId:currentSection().id};
   return null;
  }
  if(dragging.type==='section'){
-  if(st){if(st.dataset.sectionId===dragging.id)return null;const sec=sectionOf(doc,st.dataset.sectionId);return {mark:st,cls:half(st),sectionId:sec.id,notebookId:sec.notebookId};}
+  if(st){if(dragging.ids.includes(st.dataset.sectionId))return null;const sec=sectionOf(doc,st.dataset.sectionId);return {mark:st,cls:half(st),sectionId:sec.id,notebookId:sec.notebookId};}
   if(nh){const nb=nh.closest('.notebook');return {mark:nh,cls:'drop-into',notebookId:nb.dataset.notebookId};}
   return null;
  }
  if(dragging.type==='notebook'){
-  if(nh){const nb=nh.closest('.notebook');if(nb.dataset.notebookId===dragging.id)return null;return {mark:nh,cls:half(nh),notebookId:nb.dataset.notebookId};}
+  if(nh){const nb=nh.closest('.notebook');if(dragging.ids.includes(nb.dataset.notebookId))return null;return {mark:nh,cls:half(nh),notebookId:nb.dataset.notebookId};}
   return null;
  }
  return null;
@@ -271,6 +345,9 @@ navEl.addEventListener('dragstart',e=>{
  else if(st){dragging={type:'section',id:st.dataset.sectionId};st.classList.add('dragging');}
  else if(nb){dragging={type:'notebook',id:nb.dataset.notebookId};nb.classList.add('dragging');}
  else{e.preventDefault();return;}
+ // dragging one of the selected items carries all of them (in display order)
+ dragging.ids=isSelected(dragging.type,dragging.id)?selectedIds():[dragging.id];
+ for(const id of dragging.ids){const node=navEl.querySelector(dragging.type==='page'?`.page-button[data-page-id="${id}"]`:dragging.type==='section'?`.section-tab[data-section-id="${id}"]`:`.notebook-button[data-notebook-id="${id}"]`);node?.classList.add('dragging');}
  e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',dragging.type);}catch{}
 });
 navEl.addEventListener('dragend',()=>{dragging=null;clearDropMarks();for(const x of navEl.querySelectorAll('.dragging'))x.classList.remove('dragging');});
@@ -281,20 +358,21 @@ navEl.addEventListener('dragover',e=>{
 navEl.addEventListener('dragleave',e=>{if(!navEl.contains(e.relatedTarget))clearDropMarks();});
 navEl.addEventListener('drop',e=>{
  if(!dragging)return;e.preventDefault();const t=dropTarget(e),d=dragging;dragging=null;clearDropMarks();if(!t)return;
- let moved=false;
+ let moved=false;const ids=d.ids||[d.id];
+ // the item right after the target that is not being dragged (for 'drop-after')
+ const nextOf=(list,targetId)=>{const i=list.findIndex(x=>x.id===targetId);for(let j=i+1;j<list.length;j++)if(!ids.includes(list[j].id))return list[j].id;return null;};
  if(d.type==='page'){
-  if(t.cls==='drop-into')moved=movePage(doc,d.id,t.sectionId,null);
-  else if(t.cls==='drop-before')moved=movePage(doc,d.id,t.sectionId,t.pageId);
-  else{const list=pagesIn(doc,t.sectionId),i=list.findIndex(pg=>pg.id===t.pageId);moved=movePage(doc,d.id,t.sectionId,list[i+1]?list[i+1].id:null);}
-  if(moved){touchPages([d.id]);if(d.id===doc.activeId){selectedSectionId=null;breadcrumb();}}
+  const before=t.cls==='drop-into'?null:t.cls==='drop-before'?t.pageId:nextOf(pagesIn(doc,t.sectionId),t.pageId);
+  for(const id of ids)if(movePage(doc,id,t.sectionId,before))moved=true;
+  if(moved){touchPages(ids);if(ids.includes(doc.activeId)){selectedSectionId=null;breadcrumb();}}
  } else if(d.type==='section'){
-  if(t.cls==='drop-into')moved=moveSection(doc,d.id,t.notebookId,null);
-  else if(t.cls==='drop-before')moved=moveSection(doc,d.id,t.notebookId,t.sectionId);
-  else{const list=sectionsIn(doc,t.notebookId),i=list.findIndex(x=>x.id===t.sectionId);moved=moveSection(doc,d.id,t.notebookId,list[i+1]?list[i+1].id:null);}
+  const before=t.cls==='drop-into'?null:t.cls==='drop-before'?t.sectionId:nextOf(sectionsIn(doc,t.notebookId),t.sectionId);
+  for(const id of ids)if(moveSection(doc,id,t.notebookId,before))moved=true;
  } else {
-  if(t.cls==='drop-before')moved=moveNotebook(doc,d.id,t.notebookId);
-  else{const i=doc.notebooks.findIndex(x=>x.id===t.notebookId);moved=moveNotebook(doc,d.id,doc.notebooks[i+1]?doc.notebooks[i+1].id:null);}
+  const before=t.cls==='drop-before'?t.notebookId:nextOf(doc.notebooks,t.notebookId);
+  for(const id of ids)if(moveNotebook(doc,id,before))moved=true;
  }
+ if(ids.length>1)clearMulti(false);
  if(moved){changed();renderPages();}
 });
 // ---- forms: new page / section / notebook, renames ----

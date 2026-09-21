@@ -770,6 +770,12 @@ function openOekakiInbox(){return new Promise((resolve,reject)=>{
  const r=indexedDB.open('oekaki-share',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('inbox'))r.result.createObjectStore('inbox',{keyPath:'id'});};
  r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
 });}
+const RECEIVE_NOTEBOOK='データ受け取り',RECEIVE_SECTION='お絵かきツール';
+function receiveSection(){
+ let nb=doc.notebooks.find(n=>n.name===RECEIVE_NOTEBOOK);if(!nb)nb=addNotebook(doc,RECEIVE_NOTEBOOK);
+ let sec=sectionsIn(doc,nb.id).find(x=>x.name===RECEIVE_SECTION);if(!sec)sec=addSection(doc,nb.id,RECEIVE_SECTION);
+ return sec;
+}
 let importingOekaki=false;
 async function importFromOekaki() {
  if(!ready||importingOekaki)return;importingOekaki=true;
@@ -787,10 +793,15 @@ async function importFromOekaki() {
     files.push(new File([u8],(it.name||'お絵かき')+'.png',{type:m[1]}));done.push(it.id);
    }catch(e){console.warn('oekaki inbox item',e);done.push(it.id);}
   }
-  if(files.length)await insertImages(files,null);
+  // ノートブック「データ受け取り」› セクション「お絵かきツール」に、絵ごとに新しいページを作って貼る
+  for(const f of files){
+   const sec=receiveSection();if(!sec)break;
+   const pg=createPageIn(sec.id,f.name.replace(/\.png$/,''));if(!pg)break;
+   await insertImages([f],null);
+  }
   await new Promise((res,rej)=>{const tx=idb.transaction('inbox','readwrite');for(const id of done)tx.objectStore('inbox').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
   idb.close();
-  message('お絵かきツールから画像を'+files.length+'枚受け取りました。');
+  message('お絵かきツールから画像を'+files.length+'枚受け取り、「'+RECEIVE_NOTEBOOK+' › '+RECEIVE_SECTION+'」に保存しました。');
  }catch(e){console.warn('oekaki inbox',e);}
  finally{importingOekaki=false;}
 }

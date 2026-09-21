@@ -777,12 +777,21 @@ function receiveSection(){
  return sec;
 }
 let importingOekaki=false;
-async function importFromOekaki() {
+// アプリ版(ホーム画面 / インストール済み = standalone 表示)だけが自動で受け取る。
+// ブラウザのタブで開いている場合は、届いていることだけ知らせ、ボタンを押したときに受け取る
+const isStandaloneApp=()=>window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+async function importFromOekaki(force=false) {
  if(!ready||importingOekaki)return;importingOekaki=true;
  try{
   const idb=await openOekakiInbox();
   const items=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error);});
   if(!items.length){idb.close();return;}
+  if(!force&&!isStandaloneApp()){
+   idb.close();
+   message('お絵かきツールから画像が'+items.length+'枚届いています。アプリ版の余白ノートを開くと自動で受け取ります。');
+   const b=document.createElement('button');b.textContent='このページ(ブラウザ版)で受け取る';b.onclick=()=>importFromOekaki(true);$('message').append(' ',b);
+   return;
+  }
   if(document.body.classList.contains('reading')){idb.close();message('お絵かきツールから画像が届いています。「編集に戻る」を押すと貼り付けます。');return;}
   // data URL は CSP で fetch できないことがあるので自前で復号する
   const files=[],done=[];

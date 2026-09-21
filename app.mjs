@@ -825,6 +825,72 @@ async function importFromOekaki(force=false) {
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)importFromOekaki();});
 window.addEventListener('focus',()=>importFromOekaki());
+// ---- お絵かきツールから GitHub 経由で受け取る ----
+// iPad のホーム画面アプリなどブラウザの保存領域を共有できない場合のため、お絵かきツールと同じ GitHub リポジトリの
+// `_yohaku-inbox/` フォルダに置かれた PNG を取りに行き、取り込んだら削除する。
+const OEKAKI_GH_KEY='yohaku-oekaki-github',OEKAKI_DONE_KEY='yohaku-oekaki-done',OEKAKI_INBOX='_yohaku-inbox/';
+function oekakiGhConfig(){try{return JSON.parse(localStorage.getItem(OEKAKI_GH_KEY)||'null');}catch{return null;}}
+function oekakiDone(){try{return new Set(JSON.parse(localStorage.getItem(OEKAKI_DONE_KEY)||'[]'));}catch{return new Set();}}
+function saveOekakiDone(set){try{localStorage.setItem(OEKAKI_DONE_KEY,JSON.stringify([...set].slice(-200)));}catch{}}
+async function ghApi(cfg,path,init={}) {
+ const method=(init.method||'GET').toUpperCase();
+ const url='https://api.github.com'+path+(method==='GET'?(path.includes('?')?'&':'?')+'_='+Date.now():'');
+ const r=await fetch(url,{...init,cache:'no-store',headers:{Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(init.body?{'Content-Type':'application/json'}:{})}});
+ if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('GitHub '+r.status+(r.status===401?'（トークンが違うか期限切れ）':r.status===404?'（リポジトリ名かオーナー名が違うか、権限なし）':'')+' '+t.slice(0,80));}
+ return r.status===204?null:r.json();
+}
+function updateOekakiBadge(){const cfg=oekakiGhConfig();const b=$('oekaki-badge');if(b){b.textContent=cfg&&cfg.token?'オン':'オフ';b.className='sync-badge '+(cfg&&cfg.token?'on':'');}}
+let fetchingOekaki=false,lastOekakiFetch=0;
+async function fetchOekakiFromGitHub(manual=false) {
+ const cfg=oekakiGhConfig();if(!ready||fetchingOekaki||!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
+ if(!manual&&Date.now()-lastOekakiFetch<30000)return;
+ lastOekakiFetch=Date.now();fetchingOekaki=true;
+ const st=$('oekaki-status');const say=t=>{if(st)st.textContent=t;};
+ try{
+  if(manual)say('GitHub を確認中…');
+  const base='/repos/'+encodeURIComponent(cfg.owner)+'/'+encodeURIComponent(cfg.repo),branch=cfg.branch||'main';
+  const head=(await ghApi(cfg,base+'/git/ref/heads/'+encodeURIComponent(branch))).object.sha;
+  const commit=await ghApi(cfg,base+'/git/commits/'+head);
+  const tree=await ghApi(cfg,base+'/git/trees/'+commit.tree.sha+'?recursive=1');
+  const files=tree.tree.filter(i=>i.type==='blob'&&i.path.startsWith(OEKAKI_INBOX)&&/\.png$/i.test(i.path)).sort((a,b)=>a.path.localeCompare(b.path));
+  if(!files.length){if(manual)say('GitHub に新しい画像はありません（'+new Date().toLocaleTimeString()+'）');return;}
+  if(document.body.classList.contains('reading')){message('お絵かきツールから画像が届いています。「編集に戻る」を押すと貼り付けます。');return;}
+  const done=oekakiDone();let count=0;
+  for(const f of files){
+   if(done.has(f.path))continue; // 前回取り込み済みだが削除に失敗したもの
+   const blob=await ghApi(cfg,base+'/git/blobs/'+f.sha);
+   const bin=atob(blob.content.replace(/\n/g,''));const u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+   const name=(f.path.slice(OEKAKI_INBOX.length).replace(/^\d+-/,'').replace(/\.png$/i,'')||'お絵かき').slice(0,100);
+   const sec=receiveSection();if(!sec)break;const pg=createPageIn(sec.id,name);if(!pg)break;
+   await insertImages([new File([u8],name+'.png',{type:'image/png'})],null);
+   done.add(f.path);saveOekakiDone(done);count++;
+  }
+  // 取り込んだファイルを GitHub から消す（同時に別のコミットが入っていたら次回に持ち越す）
+  try{
+   const newTree=await ghApi(cfg,base+'/git/trees',{method:'POST',body:JSON.stringify({base_tree:commit.tree.sha,tree:files.map(f=>({path:f.path,mode:'100644',type:'blob',sha:null}))})});
+   const c2=await ghApi(cfg,base+'/git/commits',{method:'POST',body:JSON.stringify({message:'yohaku-note received '+files.length+' image(s)',tree:newTree.sha,parents:[head]})});
+   await ghApi(cfg,base+'/git/refs/heads/'+encodeURIComponent(branch),{method:'PATCH',body:JSON.stringify({sha:c2.sha,force:false})});
+   const d=oekakiDone();for(const f of files)d.delete(f.path);saveOekakiDone(d);
+  }catch(e){console.warn('inbox cleanup',e);}
+  if(count){message('お絵かきツールから画像を'+count+'枚受け取り、「'+RECEIVE_NOTEBOOK+' › '+RECEIVE_SECTION+'」に保存しました。');say('受け取り: '+count+'枚（'+new Date().toLocaleTimeString()+'）');}
+  else if(manual)say('新しい画像はありません');
+ }catch(e){console.warn('oekaki github',e);if(manual)say('受け取りに失敗: '+e.message);}
+ finally{fetchingOekaki=false;}
+}
+function setupOekakiGitHub(){
+ const cfg=oekakiGhConfig()||{};
+ $('oekaki-token').value=cfg.token||'';$('oekaki-owner').value=cfg.owner||'';$('oekaki-repo').value=cfg.repo||'';$('oekaki-branch').value=cfg.branch||'main';
+ $('oekaki-save').onclick=()=>{
+  const c={token:$('oekaki-token').value.trim(),owner:$('oekaki-owner').value.trim(),repo:$('oekaki-repo').value.trim(),branch:$('oekaki-branch').value.trim()||'main'};
+  try{localStorage.setItem(OEKAKI_GH_KEY,JSON.stringify(c));}catch{}
+  updateOekakiBadge();$('oekaki-status').textContent=c.token?'保存しました。確認しています…':'設定を消しました';
+  if(c.token)fetchOekakiFromGitHub(true);
+ };
+ $('oekaki-fetch').onclick=()=>fetchOekakiFromGitHub(true);
+ updateOekakiBadge();
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)fetchOekakiFromGitHub();});
+window.addEventListener('focus',()=>fetchOekakiFromGitHub());
 // 診断: ?diag を付けて開くと、受け取り機能の状態を表示する
 async function oekakiDiag(){
  let n='?';try{const idb=await openOekakiInbox();n=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').count();q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});idb.close();}catch(e){n='エラー '+e.message;}
@@ -1385,6 +1451,7 @@ async function start() {
   if('serviceWorker' in navigator)setupServiceWorker();
   syncBoot();
   importFromOekaki();
+  setupOekakiGitHub();fetchOekakiFromGitHub();
   if(new URLSearchParams(location.search).has('diag'))oekakiDiag();
  }catch(error){
   message('メモを開けませんでした。元の保存データを上書きせず停止しています。ブラウザの保存設定を確認し、再読み込みしてください。 '+error.message);

@@ -755,7 +755,16 @@ $('add-image').onclick=()=>{$('image-file').value='';$('image-file').click();};
 $('image-file').onchange=e=>{const files=[...e.target.files];if(files.length)insertImages(files,null);};
 document.addEventListener('paste',e=>{
  if(!ready)return;const files=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
- if(!files.length)return;e.preventDefault();insertImages(files,null);
+ if(!files.length)return;e.preventDefault();
+ // お絵かきツールがクリップボードに入れた画像(text/plain に印がある)は「データ受け取り › お絵かきツール」の新しいページへ
+ const tag=(e.clipboardData?.getData('text/plain')||'').trim();
+ if(tag.startsWith('oekaki-tool:')){
+  const name=(tag.slice('oekaki-tool:'.length).trim()||'お絵かき').slice(0,100);
+  if(document.body.classList.contains('reading')){message('画像を貼るには「編集に戻る」を押してください。');return;}
+  const sec=receiveSection();if(sec&&createPageIn(sec.id,name))insertImages(files.map(f=>new File([f],name+'.png',{type:f.type})),null).then(()=>message('お絵かきツールの画像を「'+RECEIVE_NOTEBOOK+' › '+RECEIVE_SECTION+'」に保存しました。'));
+  return;
+ }
+ insertImages(files,null);
 });
 window.addEventListener('dragover',e=>e.preventDefault());
 window.addEventListener('drop',e=>{

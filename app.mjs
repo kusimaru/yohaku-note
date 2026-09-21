@@ -763,6 +763,39 @@ window.addEventListener('drop',e=>{
  const files=[...(e.dataTransfer?.files||[])].filter(f=>f.type.startsWith('image/'));if(!files.length)return;
  const inside=sheet.contains(e.target);insertImages(files,inside?coordinates(e):null);
 });
+// ---- お絵かきツールからの受け取り ----
+// 同じ kusimaru.github.io 上の「お絵かきツール」が、共有の IndexedDB('oekaki-share' / 'inbox')に
+// 描いた絵(PNG の data URL)を置く。起動時と画面に戻ったときに取り出して、今のページに画像として貼る。
+function openOekakiInbox(){return new Promise((resolve,reject)=>{
+ const r=indexedDB.open('oekaki-share',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('inbox'))r.result.createObjectStore('inbox',{keyPath:'id'});};
+ r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+});}
+let importingOekaki=false;
+async function importFromOekaki() {
+ if(!ready||importingOekaki)return;importingOekaki=true;
+ try{
+  const idb=await openOekakiInbox();
+  const items=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error);});
+  if(!items.length){idb.close();return;}
+  if(document.body.classList.contains('reading')){idb.close();message('お絵かきツールから画像が届いています。「編集に戻る」を押すと貼り付けます。');return;}
+  // data URL は CSP で fetch できないことがあるので自前で復号する
+  const files=[],done=[];
+  for(const it of items){
+   try{
+    const m=/^data:(image\/[a-z]+);base64,(.*)$/s.exec(it.src||'');if(!m)throw new Error('bad data url');
+    const bin=atob(m[2]),u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+    files.push(new File([u8],(it.name||'お絵かき')+'.png',{type:m[1]}));done.push(it.id);
+   }catch(e){console.warn('oekaki inbox item',e);done.push(it.id);}
+  }
+  if(files.length)await insertImages(files,null);
+  await new Promise((res,rej)=>{const tx=idb.transaction('inbox','readwrite');for(const id of done)tx.objectStore('inbox').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
+  idb.close();
+  message('お絵かきツールから画像を'+files.length+'枚受け取りました。');
+ }catch(e){console.warn('oekaki inbox',e);}
+ finally{importingOekaki=false;}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)importFromOekaki();});
+window.addEventListener('focus',()=>importFromOekaki());
 // ---- pointer handling on the sheet ----
 sheet.tabIndex=-1;
 // Pen proximity: while a pen hovers over or touches the page, mark the sheet so CSS turns off
@@ -1316,6 +1349,7 @@ async function start() {
   if(saved&&saved.version!==1)setStatus('保存済み');else changed();
   if('serviceWorker' in navigator)setupServiceWorker();
   syncBoot();
+  importFromOekaki();
  }catch(error){
   message('メモを開けませんでした。元の保存データを上書きせず停止しています。ブラウザの保存設定を確認し、再読み込みしてください。 '+error.message);
   setStatus('読み込み停止',true);

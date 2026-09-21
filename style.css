@@ -641,3 +641,15 @@ body .multi-bar button[hidden]{display:none}
 .selected .sel-mark .icon{display:block}
 .page-button.selected,.section-tab.selected,.notebook-button.selected{background:#dbe7f7 !important;box-shadow:inset 0 0 0 2px #4268b0}
 .notebook-button.selected .chev{display:none}
+
+/* ---------- notebook click: the right column lists its sections ---------- */
+.notebook-button .chev-button{padding:2px;box-sizing:content-box;border-radius:4px;pointer-events:auto;cursor:pointer}
+.notebook-button .chev-button:hover{background:#d9e2dc}
+.notebook-button.browsing{background:#fff;box-shadow:0 1px 3px #263d3814}
+.nav-pages.browse .pages-head,.nav-pages.browse .list-tip{display:none}
+.nav-pages.browse .current-section .icon{width:18px;height:18px;color:#5f7166}
+.section-card{background:#fff;border:1px solid #dce3d9;border-radius:10px;margin:2px 0;padding:10px 46px 10px 10px;min-height:var(--ui-btn);flex-wrap:wrap}
+.section-card.active{border-color:#4e8068;box-shadow:inset 3px 0 #4e8068}
+.section-card .sec-name{flex:1;font-weight:600}
+.section-card .sec-count{flex:none;font-size:var(--ui-fs-sm);color:#7e8e7d;font-weight:400}
+.nav-pages.browse .add-section-link{margin-top:6px}

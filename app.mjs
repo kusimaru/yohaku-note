@@ -18,6 +18,8 @@ let selection={strokes:new Set(),blocks:new Set()},selectionLasso=null,arrowBatc
 const collapsedNotebooks=new Set();let selectedSectionId=null,lastShownSectionId=null;
 // multi-select: one kind at a time (page | section | notebook); multiMode makes every click toggle (touch/pen)
 let multiMode=false;const multi={kind:null,ids:new Set(),anchor:null};
+// when set, the right column lists this notebook's sections instead of the current section's pages
+let browsingNotebookId=null;
 let pageSort='manual';try{pageSort=['manual','updated','name'].includes(localStorage.getItem('yohaku-page-sort'))?localStorage.getItem('yohaku-page-sort'):'manual';}catch{}
 let dirty=false,saving=false,revision=0,saveFailed=false,lastInkEnd=-1e9,editing=null,lastPaperWidth=0;
 const histories=new Map();
@@ -81,10 +83,12 @@ function currentSection() {
  return sectionOf(doc,page().sectionId)||doc.sections[0];
 }
 function openPage(id) {
+ browsingNotebookId=null;
  if(id===doc.activeId){selectedSectionId=null;renderPages();return;}
  finish();doc.activeId=id;selectedSectionId=null;revision++;dirty=true;showPage();save();
 }
 function selectSection(id) {
+ browsingNotebookId=null;
  const first=pagesIn(doc,id)[0];
  if(first){openPage(first.id);}else{selectedSectionId=id;renderPages();}
 }
@@ -105,8 +109,14 @@ function renderNotebooks() {
   const head=el('div','notebook-head');
   const btn=el('button','notebook-button');btn.type='button';btn.draggable=true;btn.dataset.notebookId=nb.id;btn.setAttribute('aria-expanded',String(open));btn.title='クリックで開閉 / ドラッグで並べ替え';
   const nbIcon=el('span','nb-icon');nbIcon.style.setProperty('--sec',nb.color);
-  btn.append(icon('chevron-down','chev'),selMark(),nbIcon,el('span','nb-name',nb.name));if(isSelected('notebook',nb.id))btn.classList.add('selected');
-  btn.onclick=e=>{if(wantsSelect(e)){toggleSelect('notebook',nb.id,e.shiftKey);return;}if(collapsedNotebooks.has(nb.id))collapsedNotebooks.delete(nb.id);else collapsedNotebooks.add(nb.id);renderPages();};
+  const chev=icon('chevron-down','chev');chev.classList.add('chev-button');chev.setAttribute('role','button');chev.setAttribute('aria-label',open?'折りたたむ':'開く');
+  btn.append(chev,selMark(),nbIcon,el('span','nb-name',nb.name));if(isSelected('notebook',nb.id))btn.classList.add('selected');if(browsingNotebookId===nb.id)btn.classList.add('browsing');
+  btn.title='クリックでセクション一覧 / 矢印で開閉 / ドラッグで並べ替え';
+  btn.onclick=e=>{
+   if(wantsSelect(e)){toggleSelect('notebook',nb.id,e.shiftKey);return;}
+   if(e.target.closest('.chev')){if(collapsedNotebooks.has(nb.id))collapsedNotebooks.delete(nb.id);else collapsedNotebooks.add(nb.id);renderPages();return;}
+   browsingNotebookId=nb.id;collapsedNotebooks.delete(nb.id);renderPages();
+  };
   head.append(btn,menuButton({type:'notebook',id:nb.id,label:nb.name}));wrap.append(head);
   if(open){
    const list=el('div','sections');
@@ -130,7 +140,29 @@ function sortedPages(sectionId) {
  if(pageSort==='name')return [...list].sort((a,b)=>(a.title||'').localeCompare(b.title||'','ja'));
  return list;
 }
+function renderSectionCards(nb) {
+ const head=$('current-section');head.replaceChildren();head.style.removeProperty('--sec');
+ const secs=sectionsIn(doc,nb.id);
+ head.append(icon('book'),el('span','',nb.name+'（'+secs.length+' セクション）'));
+ const box=$('pages');box.replaceChildren();
+ for(const sec of secs){
+  const card=el('button','section-tab section-card'+(sec.id===currentSection().id?' active':''));card.type='button';card.draggable=true;card.dataset.sectionId=sec.id;card.style.setProperty('--sec',sec.color);
+  const count=pagesIn(doc,sec.id).length;
+  card.append(selMark(),icon('section','sec-icon'),el('span','sec-name',sec.name),el('small','sec-count',count+' ページ'));card.title='クリックで開く / ドラッグで並べ替え・移動';
+  if(isSelected('section',sec.id))card.classList.add('selected');
+  card.onclick=e=>{if(wantsSelect(e)){toggleSelect('section',sec.id,e.shiftKey);return;}selectSection(sec.id);};
+  const row=el('div','section-row');row.append(card,menuButton({type:'section',id:sec.id,label:sec.name}));box.append(row);
+ }
+ if(!secs.length)box.append(el('div','pages-empty','このノートブックにはまだセクションがありません。'));
+ const add=el('button','add-section-link');add.type='button';add.dataset.notebookId=nb.id;add.append(icon('plus'),'新しいセクション');
+ add.onclick=()=>showForm({kind:'new-section',notebookId:nb.id},'新しいセクション（'+nb.name+'）','','作成');
+ box.append(add);
+ $('page-count').textContent=secs.length;
+}
 function renderPageList() {
+ const browsing=browsingNotebookId?notebookOf(doc,browsingNotebookId):null;if(browsingNotebookId&&!browsing)browsingNotebookId=null;
+ document.querySelector('.nav-pages').classList.toggle('browse',!!browsing);
+ if(browsing){renderSectionCards(browsing);return;}
  const cur=currentSection(),head=$('current-section');head.replaceChildren();head.style.setProperty('--sec',cur.color);
  const nb=notebookOf(doc,cur.notebookId);head.append(icon('section','sec-icon'),el('span','',(nb?nb.name+' › ':'')+cur.name));
  const list=sortedPages(cur.id),box=$('pages');box.replaceChildren();// the list is rebuilt from scratch (the sort button calls this directly)

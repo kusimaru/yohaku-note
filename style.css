@@ -653,3 +653,47 @@ body .multi-bar button[hidden]{display:none}
 .section-card .sec-name{flex:1;font-weight:600}
 .section-card .sec-count{flex:none;font-size:var(--ui-fs-sm);color:#7e8e7d;font-weight:400}
 .nav-pages.browse .add-section-link{margin-top:6px}
+
+/* ---------- back buttons in the right column (phone flow); hidden on wide screens ---------- */
+.nav-back{display:none;align-items:center;gap:2px;background:#fff;border:1px solid #cfd8d0;border-radius:8px;padding:4px 8px 4px 4px;min-height:36px;font-size:var(--ui-fs-sm);color:#2b3f38;margin-right:4px;font-weight:600}
+.nav-back .icon{width:18px;height:18px}
+.nb-card{background:#fff;border:1px solid #dce3d9;border-radius:10px;margin:2px 0;padding:10px 46px 10px 10px;min-height:var(--ui-btn);gap:9px}
+.nb-card.active{border-color:#4e8068;box-shadow:inset 3px 0 #4e8068}
+.nb-card .nb-name{flex:1}
+.nb-card .sec-count{flex:none;font-size:var(--ui-fs-sm);color:#7e8e7d;font-weight:400}
+.nb-card-wrap{margin:0}
+.current-section{flex-wrap:wrap}
+
+/* ---------- phone layout (≤700px): drawer shows one level at a time; compact tools ---------- */
+@media(max-width:700px){
+ :root,body[data-ui="normal"],body[data-ui="large"],body[data-ui="xlarge"]{--ui-fs:15px;--ui-fs-sm:13px;--ui-fs-lg:17px;--ui-icon:20px;--ui-icon-lg:24px;--ui-btn:44px;--ui-title:24px;--rail:360px}
+ body .sidebar{width:min(var(--rail),92vw);padding:10px 12px 16px;overflow:auto;-webkit-overflow-scrolling:touch}
+ .sidebar .brand{margin:2px 40px 8px 0}.sidebar .brand h1{font-size:18px}.sidebar .brand p{display:none}.brand-mark{width:32px;height:32px;font-size:16px}
+ .notebook-name{display:none}
+ .nav-tools{margin:0}.nav-tools-tip{display:none}
+ .nav-cols{min-height:auto;flex-direction:column;margin:6px 0;border-top:0;border-radius:10px;overflow:visible}
+ .nav-notebooks{display:none}
+ .nav-pages{flex:none;border-radius:10px;padding:8px}
+ .nav-col{overflow:visible;min-height:auto}
+ body .sidebar #pages{overflow:visible;min-height:auto}
+ .nav-back{display:inline-flex}
+ .current-section{margin:2px 0 8px;gap:6px}
+ .nav-pages .page-button{padding:10px 40px 10px 10px}
+ .list-tip{display:none}
+ .sync-tools{margin-top:8px}
+ /* main area */
+ .topbar{height:auto;min-height:56px;padding:6px 10px}
+ body .topbar{min-height:56px}
+ #nav-toggle{min-width:0;padding:8px 10px}
+ #layers-toggle{padding:8px}
+ .workspace{padding:12px 10px 10px}
+ .page-heading{margin-bottom:10px}
+ body #page-title{font-size:24px}
+ .page-meta{gap:6px}
+ body .modes button{min-width:0;padding:8px 8px;font-size:14px}
+ .toolbar-primary{gap:5px;padding:6px 8px}
+ .text-tools{gap:5px;padding:6px 8px}
+ body .sizes .fmt-size{padding:5px 7px}
+ .view-strip{gap:6px}
+ .paper-caption{display:none}
+}

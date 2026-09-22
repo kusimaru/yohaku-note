@@ -20,6 +20,8 @@ const collapsedNotebooks=new Set();let selectedSectionId=null,lastShownSectionId
 let multiMode=false;const multi={kind:null,ids:new Set(),anchor:null};
 // when set, the right column lists this notebook's sections instead of the current section's pages
 let browsingNotebookId=null;
+// phone flow: notebooks › sections › pages, one level at a time in the drawer
+let browsingNotebooks=false;
 let pageSort='manual';try{pageSort=['manual','updated','name'].includes(localStorage.getItem('yohaku-page-sort'))?localStorage.getItem('yohaku-page-sort'):'manual';}catch{}
 let dirty=false,saving=false,revision=0,saveFailed=false,lastInkEnd=-1e9,editing=null,lastPaperWidth=0;
 const histories=new Map();
@@ -83,12 +85,12 @@ function currentSection() {
  return sectionOf(doc,page().sectionId)||doc.sections[0];
 }
 function openPage(id) {
- browsingNotebookId=null;
+ browsingNotebookId=null;browsingNotebooks=false;
  if(id===doc.activeId){selectedSectionId=null;renderPages();return;}
  finish();doc.activeId=id;selectedSectionId=null;revision++;dirty=true;showPage();save();
 }
 function selectSection(id) {
- browsingNotebookId=null;
+ browsingNotebookId=null;browsingNotebooks=false;
  const first=pagesIn(doc,id)[0];
  if(first){openPage(first.id);}else{selectedSectionId=id;renderPages();}
 }
@@ -115,7 +117,7 @@ function renderNotebooks() {
   btn.onclick=e=>{
    if(wantsSelect(e)){toggleSelect('notebook',nb.id,e.shiftKey);return;}
    if(e.target.closest('.chev')){if(collapsedNotebooks.has(nb.id))collapsedNotebooks.delete(nb.id);else collapsedNotebooks.add(nb.id);renderPages();return;}
-   browsingNotebookId=nb.id;collapsedNotebooks.delete(nb.id);renderPages();
+   browsingNotebookId=nb.id;browsingNotebooks=false;collapsedNotebooks.delete(nb.id);renderPages();
   };
   head.append(btn,menuButton({type:'notebook',id:nb.id,label:nb.name}));wrap.append(head);
   if(open){
@@ -140,10 +142,28 @@ function sortedPages(sectionId) {
  if(pageSort==='name')return [...list].sort((a,b)=>(a.title||'').localeCompare(b.title||'','ja'));
  return list;
 }
+const backButton=(label,handler)=>{const b=el('button','nav-back');b.type='button';b.append(icon('back'),label);b.title=label+'へ戻る';b.onclick=handler;return b;};
+function renderNotebookCards() {
+ const head=$('current-section');head.replaceChildren();head.style.removeProperty('--sec');
+ head.append(icon('book'),el('span','','ノートブック（'+doc.notebooks.length+'）'));
+ const box=$('pages');box.replaceChildren();
+ for(const nb of doc.notebooks){
+  const wrap=el('div','notebook nb-card-wrap');wrap.dataset.notebookId=nb.id;const row=el('div','notebook-head');
+  const card=el('button','notebook-button nb-card'+(nb.id===currentSection().notebookId?' active':''));card.type='button';card.draggable=true;card.dataset.notebookId=nb.id;
+  const nbIcon=el('span','nb-icon');nbIcon.style.setProperty('--sec',nb.color);
+  card.append(selMark(),nbIcon,el('span','nb-name',nb.name),el('small','sec-count',sectionsIn(doc,nb.id).length+' セクション'));card.title='クリックでセクション一覧 / ドラッグで並べ替え';
+  if(isSelected('notebook',nb.id))card.classList.add('selected');
+  card.onclick=e=>{if(wantsSelect(e)){toggleSelect('notebook',nb.id,e.shiftKey);return;}browsingNotebooks=false;browsingNotebookId=nb.id;collapsedNotebooks.delete(nb.id);renderPages();};
+  row.append(card,menuButton({type:'notebook',id:nb.id,label:nb.name}));wrap.append(row);box.append(wrap);
+ }
+ const add=el('button','add-section-link');add.type='button';add.append(icon('plus'),'新しいノートブック');
+ add.onclick=()=>$('add-notebook').click();box.append(add);
+ $('page-count').textContent=doc.notebooks.length;
+}
 function renderSectionCards(nb) {
  const head=$('current-section');head.replaceChildren();head.style.removeProperty('--sec');
  const secs=sectionsIn(doc,nb.id);
- head.append(icon('book'),el('span','',nb.name+'（'+secs.length+' セクション）'));
+ head.append(backButton('ノートブック',()=>{browsingNotebooks=true;browsingNotebookId=null;renderPages();}),icon('book'),el('span','',nb.name+'（'+secs.length+' セクション）'));
  const box=$('pages');box.replaceChildren();
  for(const sec of secs){
   const card=el('button','section-tab section-card'+(sec.id===currentSection().id?' active':''));card.type='button';card.draggable=true;card.dataset.sectionId=sec.id;card.style.setProperty('--sec',sec.color);
@@ -161,10 +181,11 @@ function renderSectionCards(nb) {
 }
 function renderPageList() {
  const browsing=browsingNotebookId?notebookOf(doc,browsingNotebookId):null;if(browsingNotebookId&&!browsing)browsingNotebookId=null;
- document.querySelector('.nav-pages').classList.toggle('browse',!!browsing);
+ const col=document.querySelector('.nav-pages');col.classList.toggle('browse',!!browsing||browsingNotebooks);col.classList.toggle('browse-notebooks',browsingNotebooks);
+ if(browsingNotebooks){renderNotebookCards();return;}
  if(browsing){renderSectionCards(browsing);return;}
  const cur=currentSection(),head=$('current-section');head.replaceChildren();head.style.setProperty('--sec',cur.color);
- const nb=notebookOf(doc,cur.notebookId);head.append(icon('section','sec-icon'),el('span','',(nb?nb.name+' › ':'')+cur.name));
+ const nb=notebookOf(doc,cur.notebookId);head.append(backButton('セクション',()=>{browsingNotebookId=cur.notebookId;renderPages();}),icon('section','sec-icon'),el('span','',(nb?nb.name+' › ':'')+cur.name));
  const list=sortedPages(cur.id),box=$('pages');box.replaceChildren();// the list is rebuilt from scratch (the sort button calls this directly)
  for(const pg of list){
   const button=el('button','page-button'+(pg.id===doc.activeId?' active':''));button.type='button';button.dataset.pageId=pg.id;button.draggable=true;button.setAttribute('aria-current',pg.id===doc.activeId?'page':'false');

@@ -44,6 +44,15 @@
   </div>
   <p id="sync-message" class="small sync-message" hidden></p>
  </details>
+ <details id="oekaki-tools" class="sync-tools"><summary title="押すと開閉します"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>お絵かきツール / マインドマップから受け取る <span id="oekaki-badge" class="sync-badge">オフ</span><svg class="icon chev" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+  <p class="small">お絵かきツールと同じ GitHub の設定を入れると、送られた絵を「データ受け取り › お絵かきツール」、マインドマップのキャプチャを「データ受け取り › マインドマップ」に自動で保存します（iPad・PC どちらでも）。</p>
+  <input type="password" id="oekaki-token" placeholder="GitHub トークン（github_pat_…）" autocomplete="off" aria-label="GitHub トークン">
+  <input type="text" id="oekaki-owner" placeholder="オーナー（例: kusimaru）" aria-label="オーナー">
+  <input type="text" id="oekaki-repo" placeholder="リポジトリ（例: oekaki-data）" aria-label="リポジトリ">
+  <input type="text" id="oekaki-branch" placeholder="ブランチ（main）" aria-label="ブランチ">
+  <div><button type="button" class="primary" id="oekaki-save">設定を保存</button><button type="button" id="oekaki-fetch">今すぐ受け取る</button></div>
+  <p id="oekaki-status" class="small sync-message"></p>
+ </details>
  <div class="sidebar-bottom"><p><span class="local-dot"></span> このブラウザに保存</p>
  <p class="small">クラウド送信はありません。<br>大切なメモはバックアップを。</p>
  <details id="file-tools"><summary>保存・書き出し</summary><button id="export-svg" disabled title="このページを Illustrator などで編集できる SVG 形式で保存します"><svg class="icon" aria-hidden="true"><use href="#i-vector"/></svg>このページをSVGで書き出す</button>

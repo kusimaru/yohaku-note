@@ -518,7 +518,7 @@ function updateViewportCanvas(force=false) {
  const top=Math.max(0,vt-VIEW_MARGIN),bottom=Math.min(p.height,vb+VIEW_MARGIN),h=Math.max(1,bottom-top);
  const q=qualityLimits();let k=scale*Math.min(devicePixelRatio||1,q.dpr);const pixels=pw(p)*k*h*k;if(pixels>q.pixels)k*=Math.sqrt(q.pixels/pixels);
  inkView={top,bottom,k};
- canvas.style.top=top+'px';canvas.style.height=h+'px';
+ canvas.style.top=top+'px';canvas.style.height=h+'px';canvas.style.width=pw(p)+'px'; // CSS width must follow the page width, or the bitmap is squeezed and strokes land left of the pen
  canvas.width=Math.max(1,Math.round(pw(p)*k));canvas.height=Math.max(1,Math.round(h*k));
  ctx.setTransform(k,0,0,k,0,-top*k);
  redraw();

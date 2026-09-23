@@ -1,4 +1,4 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
@@ -475,12 +475,20 @@ function growPage(p,needed) {
  if(next===p.height)return false;
  p.height=next;if(p===page())layout();return true;
 }
+// the page also grows to the right: the paper element is resized first (sizePaper, set up with the zoom
+// control), then everything is laid out for the new width. No finish() here: this runs mid-stroke.
+function growPageWidth(p,needed) {
+ const next=Math.min(MAX_WIDTH,Math.max(pw(p),Math.ceil(needed)));
+ if(next===pw(p))return false;
+ p.width=next;if(p===page())layout();return true;
+}
+let sizePaper=()=>{};
 function layout() {
  if(!doc)return;
- const p=page();scale=paper.clientWidth/W||1;sheetRectCache=null;
- sheet.style.setProperty('--ui-inverse-scale',1/scale);sheet.style.height=p.height+'px';sheet.style.transform='scale('+scale+')';lassoEl.setAttribute('height',p.height);
+ const p=page(),width=pw(p);sizePaper();scale=paper.clientWidth/width||1;sheetRectCache=null;
+ sheet.style.setProperty('--ui-inverse-scale',1/scale);sheet.style.width=width+'px';sheet.style.height=p.height+'px';sheet.style.transform='scale('+scale+')';lassoEl.setAttribute('width',width);lassoEl.setAttribute('height',p.height);
  paper.style.height=Math.round(p.height*scale)+'px';
- $('page-size').textContent='ページの高さ '+p.height+' / 最大 '+MAX_HEIGHT;$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;
+ $('page-size').textContent='ページの大きさ 幅 '+width+' × 高さ '+p.height+'（最大 '+MAX_WIDTH+' × '+MAX_HEIGHT+'）';$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;$('grow-page-x').disabled=!ready||width>=MAX_WIDTH;
  updateViewportCanvas(true);
 }
 // The ink canvas covers only the part of the page that is on screen (plus a margin), not the
@@ -508,10 +516,10 @@ function updateViewportCanvas(force=false) {
  if(!doc)return;const p=page();const [vt,vb]=viewportRange();
  if(!force&&vt>=inkView.top&&vb<=inkView.bottom)return;
  const top=Math.max(0,vt-VIEW_MARGIN),bottom=Math.min(p.height,vb+VIEW_MARGIN),h=Math.max(1,bottom-top);
- const q=qualityLimits();let k=scale*Math.min(devicePixelRatio||1,q.dpr);const pixels=W*k*h*k;if(pixels>q.pixels)k*=Math.sqrt(q.pixels/pixels);
+ const q=qualityLimits();let k=scale*Math.min(devicePixelRatio||1,q.dpr);const pixels=pw(p)*k*h*k;if(pixels>q.pixels)k*=Math.sqrt(q.pixels/pixels);
  inkView={top,bottom,k};
  canvas.style.top=top+'px';canvas.style.height=h+'px';
- canvas.width=Math.max(1,Math.round(W*k));canvas.height=Math.max(1,Math.round(h*k));
+ canvas.width=Math.max(1,Math.round(pw(p)*k));canvas.height=Math.max(1,Math.round(h*k));
  ctx.setTransform(k,0,0,k,0,-top*k);
  redraw();
 }
@@ -528,7 +536,8 @@ function coordinates(e) {
 function inkPoint(e) {
  const [x,y,pr]=coordinates(e),p=page();
  if(y>p.height-100)growPage(p,y+400);
- return [clamp(x,0,W),clamp(y,0,p.height),pr];
+ if(x>pw(p)-100)growPageWidth(p,x+400);
+ return [clamp(x,0,pw(p)),clamp(y,0,p.height),pr];
 }
 // ---- ink ----
 function dot(p,r,c,g=ctx) {g.fillStyle=c;g.beginPath();g.arc(p[0],p[1],r,0,Math.PI*2);g.fill();}
@@ -594,7 +603,7 @@ function redraw() {
 // bit of ink does not repaint the whole visible strip.
 function redrawRegion(box) {
  if(!doc||!box)return;const p=page();ensureLayers(p);const t0=performance.now();
- const x0=Math.max(0,box[0]),y0=Math.max(inkView.top,box[1]),x1=Math.min(W,box[2]),y1=Math.min(inkView.bottom,box[3]);
+ const x0=Math.max(0,box[0]),y0=Math.max(inkView.top,box[1]),x1=Math.min(pw(page()),box[2]),y1=Math.min(inkView.bottom,box[3]);
  if(x1<=x0||y1<=y0)return;const clip=[x0,y0,x1,y1];
  ctx.save();ctx.beginPath();ctx.rect(x0,y0,x1-x0,y1-y0);ctx.clip();ctx.clearRect(x0,y0,x1-x0,y1-y0);
  for(const L of p.layers){
@@ -687,7 +696,7 @@ function insideSelection(x,y) {
 }
 // Move the selected strokes/blocks by (dx,dy) relative to `base` (arrays captured before the move).
 function translateSelection(p,base,dx,dy) {
- dx=Math.round(clamp(dx,-base.bounds.x0,W-base.bounds.x1));dy=Math.round(clamp(dy,-base.bounds.y0,MAX_HEIGHT-base.bounds.y1));
+ dx=Math.round(clamp(dx,-base.bounds.x0,pw(page())-base.bounds.x1));dy=Math.round(clamp(dy,-base.bounds.y0,MAX_HEIGHT-base.bounds.y1));
  const moved=new Map();
  for(const s of base.selStrokes)moved.set(s,{...s,points:s.points.map(pt=>[pt[0]+dx,pt[1]+dy,pt[2]])});
  p.strokes=base.strokes.map(s=>moved.get(s)||s);
@@ -840,8 +849,8 @@ function removeBlock(id) {
 }
 function createTextBlock(x,y) {
  const p=page(),before=snapshot(p);
- const bx=clamp(Math.round(x)-12,0,W-240),by=clamp(Math.round(y)-14,0,MAX_HEIGHT-60);
- const block=newTextBlock(bx,by,'');block.width=Math.min(640,W-bx-24);block.height=44;
+ const bx=clamp(Math.round(x)-12,0,pw(page())-240),by=clamp(Math.round(y)-14,0,MAX_HEIGHT-60);
+ const block=newTextBlock(bx,by,'');block.width=Math.min(640,pw(page())-bx-24);block.height=44;
  p.blocks=[...p.blocks,block];growPage(p,by+block.height+60);
  commit(before);activeBlock=block.id;renderPage();
  blocksLayer.querySelector('[data-id="'+block.id+'"] .editor')?.focus();
@@ -871,8 +880,8 @@ async function insertImages(files,point) {
    if(!p)throw new Error('挿入先のページが見つかりません。');
    const total=doc.pages.reduce((n,pg)=>n+pg.blocks.reduce((m,b)=>m+(b.src?.length||0),0),0);
    if(total+img.src.length>60000000)throw new Error('試作品の画像容量の上限に達しました。');
-   const w=clamp(Math.min(img.width,600),40,W-48),h=Math.max(24,Math.round(w*img.height/img.width));
-   const x=point&&count===0?clamp(Math.round(point[0]),0,W-w):64;
+   const w=clamp(Math.min(img.width,600),40,pw(page())-48),h=Math.max(24,Math.round(w*img.height/img.width));
+   const x=point&&count===0?clamp(Math.round(point[0]),0,pw(page())-w):64;
    const y=point&&count===0?clamp(Math.round(point[1]),0,MAX_HEIGHT-h):nextFreeY(p);
    if(y+h>MAX_HEIGHT)throw new Error('ページの下端に空きがありません。新しいページに貼り付けてください。');
    const before=snapshot(p);
@@ -961,11 +970,11 @@ sheet.addEventListener('pointermove',e=>{
  }
  if(gesture.type==='lasso'){
   let events=e.getCoalescedEvents?.();if(!events?.length)events=[e];
-  for(const event of events){const [x,y]=coordinates(event);const pt=[clamp(x,0,W),clamp(y,0,page().height)];const last=gesture.points.at(-1);if(Math.hypot(pt[0]-last[0],pt[1]-last[1])>=1.5)gesture.points.push(pt);}
+  for(const event of events){const [x,y]=coordinates(event);const pt=[clamp(x,0,pw(page())),clamp(y,0,page().height)];const last=gesture.points.at(-1);if(Math.hypot(pt[0]-last[0],pt[1]-last[1])>=1.5)gesture.points.push(pt);}
   renderLasso(gesture.points);return;
  }
  if(gesture.type==='marquee'){
-  const [x,y]=coordinates(e);gesture.last=[clamp(x,0,W),clamp(y,0,page().height)];
+  const [x,y]=coordinates(e);gesture.last=[clamp(x,0,pw(page())),clamp(y,0,page().height)];
   const x0=Math.min(gesture.start[0],gesture.last[0]),y0=Math.min(gesture.start[1],gesture.last[1]);
   marqueeEl.style.left=x0+'px';marqueeEl.style.top=y0+'px';marqueeEl.style.width=Math.abs(gesture.last[0]-gesture.start[0])+'px';marqueeEl.style.height=Math.abs(gesture.last[1]-gesture.start[1])+'px';
   return;
@@ -985,14 +994,14 @@ sheet.addEventListener('pointermove',e=>{
  const p=page(),b=blockOf(gesture.blockId);if(!b)return;
  const [x,y]=coordinates(e),dx=x-gesture.start[0],dy=y-gesture.start[1],o=gesture.origin;
  if(gesture.type==='move'){
-  const nx=Math.round(clamp(o.x+dx,0,W-b.width)),ny=Math.round(clamp(o.y+dy,0,MAX_HEIGHT-b.height));
+  const nx=Math.round(clamp(o.x+dx,0,pw(page())-b.width)),ny=Math.round(clamp(o.y+dy,0,MAX_HEIGHT-b.height));
   if(nx===b.x&&ny===b.y)return;
   updateBlock(p,b.id,{x:nx,y:ny});growPage(p,ny+b.height+60);
  } else if(b.type==='text'){
-  const nw=Math.round(clamp(o.width+dx,120,W-b.x));if(nw===b.width)return;
+  const nw=Math.round(clamp(o.width+dx,120,pw(page())-b.x));if(nw===b.width)return;
   updateBlock(p,b.id,{width:nw});
  } else {
-  const nw=Math.round(clamp(o.width+dx,40,W-b.x)),nh=Math.max(24,Math.round(nw*o.height/o.width));
+  const nw=Math.round(clamp(o.width+dx,40,pw(page())-b.x)),nh=Math.max(24,Math.round(nw*o.height/o.width));
   if(b.y+nh>MAX_HEIGHT||nw===b.width)return;
   updateBlock(p,b.id,{width:nw,height:nh});growPage(p,b.y+nh+60);
  }
@@ -1043,6 +1052,7 @@ const penBusy=()=>activeGesture()||performance.now()-lastPenAt<1500;
 let pinchActive=false;
 sheet.addEventListener('touchstart',e=>{
  if(!ready||document.body.classList.contains('reading')||e.touches.length>=2)return;
+ if(e.target instanceof Element&&e.target.closest('button,.block-bar,.resize,select,input'))return; // controls keep their tap
  const inkTool=inkToolNow();
  if((stylusTouch(e)&&inkTool)||activeGesture()||(inkTool&&(penBusy()||palmTouch(e))))e.preventDefault();
 },{passive:false});
@@ -1281,6 +1291,7 @@ function growAndReveal() {
  message('ページを下に広げました（高さ '+p.height+' / 最大 '+MAX_HEIGHT+'）。');
 }
 $('grow-page').onclick=growAndReveal;
+$('grow-page-x').onclick=()=>{if(!ready)return;const p=page();if(growPageWidth(p,pw(p)+600))changed();};
 $('add-page').onclick=()=>{
  if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return;}
  const sec=currentSection();showForm({kind:'new-page'},'新しいページ（'+sec.name+'）','','作成');
@@ -1558,9 +1569,13 @@ function initializePresentation(){
  const setCustomZoom=z=>{customZoom=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));customOpt.hidden=false;customOpt.textContent=Math.round(customZoom*100)+'%';zoom.value='custom';};
  try{const saved=localStorage.getItem('yohaku-view-zoom');if(['fit','.75','1','1.25'].includes(saved))zoom.value=saved;else if(saved&&Number.isFinite(+saved))setCustomZoom(+saved);}catch{}
  const zoomFactor=()=>zoom.value==='fit'?null:zoom.value==='custom'?customZoom:Number(zoom.value);
+ sizePaper=()=>{
+  const z=zoomFactor(),width=pw(page());
+  paper.style.width=z===null?(width===W?'100%':Math.round($('paper-viewport').clientWidth*width/W)+'px'):(width*z)+'px';
+ };
+ window.addEventListener('resize',()=>{if(zoomFactor()===null&&pw(page())!==W)layout();});
  function applyZoom(){
-  finish();const z=zoomFactor();paper.style.width=z===null?'100%':(W*z)+'px';
-  $('paper-viewport').scrollLeft=0;layout();
+  finish();$('paper-viewport').scrollLeft=0;layout();
   try{localStorage.setItem('yohaku-view-zoom',zoom.value==='custom'?String(customZoom):zoom.value);}catch{}
  }
  zoom.onchange=()=>{if(zoom.value!=='custom')customOpt.hidden=true;applyZoom();};applyZoom();
@@ -1570,26 +1585,26 @@ function initializePresentation(){
  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
  const center=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
  function anchorTo(cx,cy){ // keep the page point under the fingers where it is
-  const z=paper.clientWidth/W,r=vp.getBoundingClientRect();
+  const z=paper.clientWidth/pw(page()),r=vp.getBoundingClientRect();
   vp.scrollLeft=pinch.px*z-(cx-r.left);
   const want=cy-pinch.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
  }
  vp.addEventListener('touchstart',e=>{
   if(e.touches.length!==2)return;
   e.preventDefault();finish();pinchActive=true;
-  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t),r=vp.getBoundingClientRect(),z0=paper.clientWidth/W,top=sheet.getBoundingClientRect().top;
+  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t),r=vp.getBoundingClientRect(),z0=paper.clientWidth/pw(page()),top=sheet.getBoundingClientRect().top;
   pinch={d0:dist(t),z0,px:(vp.scrollLeft+cx-r.left)/z0,py:(cy-top)/z0};
  },{passive:false});
  vp.addEventListener('touchmove',e=>{
   if(!pinch||e.touches.length<2)return;e.preventDefault();
   const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t);pinchTarget=pinch.z0*dist(t)/pinch.d0;
   if(pinchRaf)return;
-  pinchRaf=requestAnimationFrame(()=>{pinchRaf=0;if(!pinch)return;setCustomZoom(pinchTarget);paper.style.width=(W*customZoom)+'px';layout();anchorTo(cx,cy);});
+  pinchRaf=requestAnimationFrame(()=>{pinchRaf=0;if(!pinch)return;setCustomZoom(pinchTarget);layout();anchorTo(cx,cy);});
  },{passive:false});
  for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,e=>{
   if(!pinch||e.touches.length>=2)return;
   pinch=null;pinchActive=false;if(pinchRaf){cancelAnimationFrame(pinchRaf);pinchRaf=0;}
-  setCustomZoom(pinchTarget||customZoom);paper.style.width=(W*customZoom)+'px';layout();
+  setCustomZoom(pinchTarget||customZoom);layout();
   try{localStorage.setItem('yohaku-view-zoom',String(customZoom));}catch{}
  });
  $('view-pan').onclick=()=>setReading(!document.body.classList.contains('reading'));

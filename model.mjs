@@ -1,4 +1,6 @@
-export const PAGE_WIDTH=1200, PAGE_HEIGHT=760, MAX_HEIGHT=6000;
+export const PAGE_WIDTH=1200, PAGE_HEIGHT=760, MAX_HEIGHT=6000, MAX_WIDTH=4800;
+// pages start 1200 wide and grow to the right when writing reaches the edge (like they grow downwards)
+export const pageWidth=p=>Number.isFinite(p?.width)&&p.width>PAGE_WIDTH?Math.min(MAX_WIDTH,p.width):PAGE_WIDTH;
 // ---- rich text runs ----
 // A text block stores plain `text` and optional `runs`: [{text,bold?,size?,color?}|{hr:true}].
 export const DEFAULT_TEXT_COLOR='#2b3f38',MIN_FONT=8,MAX_FONT=72;
@@ -405,15 +407,16 @@ export function validateBackup(doc) {
   if(p.category!==undefined&&(typeof p.category!=='string'||p.category.length>60))bad();
   if(p.sectionId!==undefined&&(typeof p.sectionId!=='string'||!p.sectionId||p.sectionId.length>100))bad();
   ids.add(p.id);
-  const height=doc.version===1?PAGE_HEIGHT:p.height;
+  const height=doc.version===1?PAGE_HEIGHT:p.height,width=p.width===undefined?PAGE_WIDTH:p.width;
   if(!Number.isFinite(height)||height<760||height>MAX_HEIGHT)bad();
+  if(!Number.isFinite(width)||width<PAGE_WIDTH||width>MAX_WIDTH)bad();
   if(doc.version===1){if(typeof p.text!=='string'||p.text.length>200000)bad();}
   else {
    if(!Array.isArray(p.blocks)||p.blocks.length>1000)bad();const blockIds=new Set();
    for(const o of p.blocks){
     if(!o||typeof o.id!=='string'||o.id.length>100||blockIds.has(o.id)||!['text','image'].includes(o.type)||
      ![o.x,o.y,o.width,o.height].every(Number.isFinite)||o.x<0||o.y<0||o.width<40||o.height<24||
-     o.x+o.width>PAGE_WIDTH+.01||o.y+o.height>height+.01)bad();
+     o.x+o.width>width+.01||o.y+o.height>height+.01)bad();
     blockIds.add(o.id);
     if(o.type==='text'){if(typeof o.text!=='string'||o.text.length>200000)bad();if(o.runs!==undefined)validateRuns(o.runs,bad);}
     else {if(typeof o.src!=='string'||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(o.src)||o.src.length>16000000)bad();totalImages+=o.src.length;if(totalImages>65000000)bad();}
@@ -434,7 +437,7 @@ export function validateBackup(doc) {
     typeof s.pressure!=='boolean'||!Array.isArray(s.points)||s.points.length<1)bad();
    if(s.layer!==undefined&&(typeof s.layer!=='string'||s.layer.length>100||(layerIds&&!layerIds.has(s.layer))))bad();
    points+=s.points.length;if(points>2000000)bad();
-   for(const pt of s.points)if(!Array.isArray(pt)||pt.length!==3||!pt.every(Number.isFinite)||pt[0]<0||pt[0]>PAGE_WIDTH||pt[1]<0||pt[1]>height||pt[2]<0||pt[2]>1)bad();
+   for(const pt of s.points)if(!Array.isArray(pt)||pt.length!==3||!pt.every(Number.isFinite)||pt[0]<0||pt[0]>width||pt[1]<0||pt[1]>height||pt[2]<0||pt[2]>1)bad();
   }
  };
  for(const p of doc.pages)checkPage(p);

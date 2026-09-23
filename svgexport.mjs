@@ -1,4 +1,4 @@
-import { PAGE_WIDTH, inkWidth, blockRuns, ensureLayers, DEFAULT_TEXT_COLOR } from './model.mjs';
+import { PAGE_WIDTH, pageWidth, inkWidth, blockRuns, ensureLayers, DEFAULT_TEXT_COLOR } from './model.mjs';
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const num=v=>String(Math.round(v*100)/100);
 const idOf=s=>String(s).replace(/[^\w\u3040-\u30ff\u3400-\u9fff\-]/g,'_').slice(0,40)||'layer';
@@ -45,7 +45,8 @@ function textElement(b) {
 export function pageToSvg(page,{includeText=true,includeImages=true,includeHidden=false}={}) {
  ensureLayers(page);
  const H=page.height;
- let out='<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+PAGE_WIDTH+'" height="'+H+'" viewBox="0 0 '+PAGE_WIDTH+' '+H+'">\n';
+ const PW=pageWidth(page);
+ let out='<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+PW+'" height="'+H+'" viewBox="0 0 '+PW+' '+H+'">\n';
  out+='<title>'+esc(page.title||'名称未設定')+'</title>\n';
  if(includeImages&&page.blocks.some(b=>b.type==='image')){
   out+='<g id="images">\n';

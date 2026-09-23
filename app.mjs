@@ -1559,6 +1559,11 @@ function initializePresentation(){
   if(remember)try{localStorage.setItem('yohaku-layers-open',opened?'1':'0');}catch{}
  }
  $('layers-toggle').onclick=()=>setLayers(layerPanel.hidden);
+ // "表示" fold-out (reading mode, text size, drawing quality, zoom) under the ribbon; remembered
+ const viewPanel=$('view-panel'),viewToggle=$('view-toggle');
+ function setViewPanel(open){viewPanel.hidden=!open;viewToggle.setAttribute('aria-expanded',String(open));try{localStorage.setItem('yohaku-view-open',open?'1':'0');}catch{}}
+ viewToggle.onclick=()=>setViewPanel(viewPanel.hidden);
+ try{setViewPanel(localStorage.getItem('yohaku-view-open')==='1');}catch{}
  $('layer-close').onclick=()=>{setLayers(false);$('layers-toggle').focus();};
  let layersPref=null;try{layersPref=localStorage.getItem('yohaku-layers-open');}catch{}
  setLayers(layersPref==='1'||(layersPref===null&&innerWidth>1180),false);placePanelDefault();
@@ -1580,7 +1585,7 @@ function initializePresentation(){
   updateZoomUi(z); // the slider shows the effective factor, also after page switches and window resizes
  };
  const persistZoom=()=>{try{localStorage.setItem('yohaku-view-zoom',zoomMode==='fit'?'fit':String(customZoom));}catch{}};
- window.addEventListener('resize',()=>{if(zoomFactor()===null){if(pw(page())!==W)layout();updateZoomUi(null);}});
+ window.addEventListener('resize',()=>{if(!doc)return;if(zoomFactor()===null){if(pw(page())!==W)layout();updateZoomUi(null);}});
  function applyZoom(){finish();vp.scrollLeft=0;layout();updateZoomUi(zoomFactor());persistZoom();}
  fitBtn.onclick=()=>{zoomMode='fit';applyZoom();};
  applyZoom();

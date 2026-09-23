@@ -728,3 +728,49 @@ body .toolbar{position:static;top:auto}
 .tools-sticky{position:sticky;top:72px;z-index:30;background:#f3f5f1;padding-bottom:6px;margin-bottom:6px}
 @media(max-width:700px){.tools-sticky{top:56px}}
 .tools-sticky .view-strip{margin-top:8px}
+
+/* ---------- OneNote-like layout: thin top bar, one ribbon row, everything else is the note ---------- */
+body .topbar{height:48px;min-height:48px;padding:0 12px;gap:8px}
+body .topbar button{min-height:36px;padding:4px 10px;font-size:var(--ui-fs-sm)}
+body .topbar .icon{width:18px;height:18px}
+body #save-status{padding:4px 10px}
+#view-toggle[aria-expanded=true],#layers-toggle[aria-expanded=true]{background:#e0edda;border-color:#95b489;color:#315d35}
+main{background:#fff;min-height:100vh}
+body .workspace{max-width:none;padding:0;margin:0}
+body .message{margin:8px 12px}
+.tools-sticky{top:48px;background:#fff;padding:0;margin:0;border-bottom:1px solid #e4e8e1}
+body .toolbar{border:0;border-radius:0;box-shadow:none;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:4px 10px;background:#fff;position:static}
+body .toolbar-primary{min-height:0;padding:0;gap:6px;display:flex;align-items:center}
+.toolbar-context{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0;flex:1;border-left:1px solid #e4e8e1;padding-left:10px}
+.toolbar-context:empty{display:none;border:0}
+.toolbar-context .text-tools,.toolbar-context .sub-options,.toolbar-context #pen-settings{border:0;padding:0;margin:0;width:auto}
+body .text-tools{border-top:0;padding-top:0;margin-top:0;width:auto}
+.fmt-hint{display:none}
+.history{margin-left:0}
+body .modes button{min-height:38px;padding:5px 10px}
+body .modes button>span{font-size:16px}
+body .tool-group button{padding:6px 9px;min-height:38px}
+.view-panel{background:#f7f9f5;border-top:1px solid #e4e8e1;padding:6px 12px}
+.view-panel[hidden]{display:none}
+.tools-sticky .view-strip{margin:0;min-height:0}
+/* the note: title and place inside the white area, no card, no captions */
+.page-heading{margin:0;padding:20px 48px 4px;max-width:1500px}
+.eyebrow{display:none}
+body #page-title{font-size:28px;border:0;border-bottom:2px solid #d5ddd3;border-radius:0;background:transparent;padding:4px 0;box-shadow:none;width:100%;max-width:900px}
+body #page-title:focus{outline:none;border-bottom-color:#4e8068}
+.page-meta{margin-top:6px}
+.paper-caption,.help{display:none}
+.paper-viewport{border:0;border-radius:0;box-shadow:none;margin:8px 0 0}
+.canvas-footer{padding:6px 12px 18px}
+@media(max-width:700px){.page-heading{padding:12px 14px 2px}body #page-title{font-size:22px}.tools-sticky{top:48px}}
+/* ribbon: the contextual group drops to its own row when the width is short; items inside a group stay in one line */
+body .toolbar-context{flex:1 1 600px;min-width:0;border-left:0;padding-left:0;overflow:hidden}
+body .toolbar-context .tool-group,body .toolbar-context .sizes,body .toolbar-context .fmt-colors{flex-wrap:nowrap;flex-shrink:0}
+body .toolbar-primary{flex-wrap:nowrap}
+body .toolbar-primary .group-label{display:none}
+body .toolbar{overflow:hidden;max-width:100%}
+@media(max-width:700px){body .toolbar-primary{flex-wrap:wrap}}
+/* compact ribbon rows */
+body .text-tools,body .pen-settings,body #eraser-options,body #select-options{min-height:42px;padding:2px 4px;gap:6px}
+body .text-tools .tool-group button,body .toolbar-context button{min-height:36px;padding:4px 8px}
+body .toolbar{padding:3px 8px;gap:2px 10px}

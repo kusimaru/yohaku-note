@@ -886,17 +886,7 @@ $('add-image').onclick=()=>{$('image-file').value='';$('image-file').click();};
 $('image-file').onchange=e=>{const files=[...e.target.files];if(files.length)insertImages(files,null);};
 document.addEventListener('paste',e=>{
  if(!ready)return;const files=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
- if(!files.length)return;e.preventDefault();
- // お絵かきツール / マインドマップがクリップボードに入れた画像(text/plain に印がある)は「データ受け取り」の新しいページへ
- const tag=(e.clipboardData?.getData('text/plain')||'').trim();
- if(tag.startsWith('oekaki-tool:')||tag.startsWith('mindmap:')){
-  const mm=tag.startsWith('mindmap:'),secName=mm?RECEIVE_SECTION_MM:RECEIVE_SECTION;
-  const name=(tag.slice(tag.indexOf(':')+1).trim()||(mm?'マインドマップ':'お絵かき')).slice(0,100);
-  if(document.body.classList.contains('reading')){message('画像を貼るには「編集に戻る」を押してください。');return;}
-  const sec=receiveSection(secName);if(sec&&createPageIn(sec.id,name))insertImages(files.map(f=>new File([f],name+'.png',{type:f.type})),null).then(()=>message((mm?'マインドマップ':'お絵かきツール')+'の画像を「'+RECEIVE_NOTEBOOK+' › '+secName+'」に保存しました。'));
-  return;
- }
- insertImages(files,null);
+ if(!files.length)return;e.preventDefault();insertImages(files,null);
 });
 window.addEventListener('dragover',e=>e.preventDefault());
 window.addEventListener('drop',e=>{
@@ -904,135 +894,6 @@ window.addEventListener('drop',e=>{
  const files=[...(e.dataTransfer?.files||[])].filter(f=>f.type.startsWith('image/'));if(!files.length)return;
  const inside=sheet.contains(e.target);insertImages(files,inside?coordinates(e):null);
 });
-// ---- お絵かきツールからの受け取り ----
-// 同じ kusimaru.github.io 上の「お絵かきツール」が、共有の IndexedDB('oekaki-share' / 'inbox')に
-// 描いた絵(PNG の data URL)を置く。起動時と画面に戻ったときに取り出して、今のページに画像として貼る。
-function openOekakiInbox(){return new Promise((resolve,reject)=>{
- const r=indexedDB.open('oekaki-share',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('inbox'))r.result.createObjectStore('inbox',{keyPath:'id'});};
- r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
-});}
-const RECEIVE_NOTEBOOK='データ受け取り',RECEIVE_SECTION='お絵かきツール',RECEIVE_SECTION_MM='マインドマップ';
-// 送り元ごとのセクション: お絵かきツール / マインドマップ
-function receiveSection(name=RECEIVE_SECTION){
- let nb=doc.notebooks.find(n=>n.name===RECEIVE_NOTEBOOK);if(!nb)nb=addNotebook(doc,RECEIVE_NOTEBOOK);
- let sec=sectionsIn(doc,nb.id).find(x=>x.name===name);if(!sec)sec=addSection(doc,nb.id,name);
- return sec;
-}
-let importingOekaki=false;
-// アプリ版(ホーム画面 / インストール済み = standalone 表示)だけが自動で受け取る。
-// ブラウザのタブで開いている場合は、届いていることだけ知らせ、ボタンを押したときに受け取る
-const isStandaloneApp=()=>window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-async function importFromOekaki(force=false) {
- if(!ready)return;
- if(importingOekaki){if(force)setTimeout(()=>importFromOekaki(true),300);return;} // 自動受け取りと重なったら少し待ってやり直す
- importingOekaki=true;
- try{
-  const idb=await openOekakiInbox();
-  const items=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error);});
-  if(!items.length){idb.close();return;}
-  if(!force&&!isStandaloneApp()){
-   idb.close();
-   message('お絵かきツールから画像が'+items.length+'枚届いています。アプリ版の余白ノートを開くと自動で受け取ります。');
-   const b=document.createElement('button');b.textContent='このページ(ブラウザ版)で受け取る';b.onclick=()=>importFromOekaki(true);$('message').append(' ',b);
-   return;
-  }
-  if(document.body.classList.contains('reading')){idb.close();message('お絵かきツールから画像が届いています。「編集に戻る」を押すと貼り付けます。');return;}
-  // data URL は CSP で fetch できないことがあるので自前で復号する
-  const files=[],done=[];
-  for(const it of items){
-   try{
-    const m=/^data:(image\/[a-z]+);base64,(.*)$/s.exec(it.src||'');if(!m)throw new Error('bad data url');
-    const bin=atob(m[2]),u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-    const f=new File([u8],(it.name||(it.section==='mindmap'?'マインドマップ':'お絵かき'))+'.png',{type:m[1]});f.section=it.section==='mindmap'?RECEIVE_SECTION_MM:RECEIVE_SECTION;files.push(f);done.push(it.id);
-   }catch(e){console.warn('oekaki inbox item',e);done.push(it.id);}
-  }
-  // ノートブック「データ受け取り」› セクション「お絵かきツール」に、絵ごとに新しいページを作って貼る
-  for(const f of files){
-   const sec=receiveSection(f.section||RECEIVE_SECTION);if(!sec)break;
-   const pg=createPageIn(sec.id,f.name.replace(/\.png$/,''));if(!pg)break;
-   await insertImages([f],null);
-  }
-  await new Promise((res,rej)=>{const tx=idb.transaction('inbox','readwrite');for(const id of done)tx.objectStore('inbox').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
-  idb.close();
-  message('画像を'+files.length+'枚受け取り、「'+RECEIVE_NOTEBOOK+'」に保存しました。');
- }catch(e){console.warn('oekaki inbox',e);}
- finally{importingOekaki=false;}
-}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)importFromOekaki();});
-window.addEventListener('focus',()=>importFromOekaki());
-// ---- お絵かきツールから GitHub 経由で受け取る ----
-// iPad のホーム画面アプリなどブラウザの保存領域を共有できない場合のため、お絵かきツールと同じ GitHub リポジトリの
-// `_yohaku-inbox/` フォルダに置かれた PNG を取りに行き、取り込んだら削除する。
-const OEKAKI_GH_KEY='yohaku-oekaki-github',OEKAKI_DONE_KEY='yohaku-oekaki-done',OEKAKI_INBOX='_yohaku-inbox/';
-function oekakiGhConfig(){try{return JSON.parse(localStorage.getItem(OEKAKI_GH_KEY)||'null');}catch{return null;}}
-function oekakiDone(){try{return new Set(JSON.parse(localStorage.getItem(OEKAKI_DONE_KEY)||'[]'));}catch{return new Set();}}
-function saveOekakiDone(set){try{localStorage.setItem(OEKAKI_DONE_KEY,JSON.stringify([...set].slice(-200)));}catch{}}
-async function ghApi(cfg,path,init={}) {
- const method=(init.method||'GET').toUpperCase();
- const url='https://api.github.com'+path+(method==='GET'?(path.includes('?')?'&':'?')+'_='+Date.now():'');
- const r=await fetch(url,{...init,cache:'no-store',headers:{Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(init.body?{'Content-Type':'application/json'}:{})}});
- if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('GitHub '+r.status+(r.status===401?'（トークンが違うか期限切れ）':r.status===404?'（リポジトリ名かオーナー名が違うか、権限なし）':'')+' '+t.slice(0,80));}
- return r.status===204?null:r.json();
-}
-function updateOekakiBadge(){const cfg=oekakiGhConfig();const b=$('oekaki-badge');if(b){b.textContent=cfg&&cfg.token?'オン':'オフ';b.className='sync-badge '+(cfg&&cfg.token?'on':'');}}
-let fetchingOekaki=false,lastOekakiFetch=0;
-async function fetchOekakiFromGitHub(manual=false) {
- const cfg=oekakiGhConfig();if(!ready||fetchingOekaki||!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
- if(!manual&&Date.now()-lastOekakiFetch<30000)return;
- lastOekakiFetch=Date.now();fetchingOekaki=true;
- const st=$('oekaki-status');const say=t=>{if(st)st.textContent=t;};
- try{
-  if(manual)say('GitHub を確認中…');
-  const base='/repos/'+encodeURIComponent(cfg.owner)+'/'+encodeURIComponent(cfg.repo),branch=cfg.branch||'main';
-  const head=(await ghApi(cfg,base+'/git/ref/heads/'+encodeURIComponent(branch))).object.sha;
-  const commit=await ghApi(cfg,base+'/git/commits/'+head);
-  const tree=await ghApi(cfg,base+'/git/trees/'+commit.tree.sha+'?recursive=1');
-  const files=tree.tree.filter(i=>i.type==='blob'&&i.path.startsWith(OEKAKI_INBOX)&&/\.png$/i.test(i.path)).sort((a,b)=>a.path.localeCompare(b.path));
-  if(!files.length){if(manual)say('GitHub に新しい画像はありません（'+new Date().toLocaleTimeString()+'）');return;}
-  if(document.body.classList.contains('reading')){message('お絵かきツールから画像が届いています。「編集に戻る」を押すと貼り付けます。');return;}
-  const done=oekakiDone();let count=0;
-  for(const f of files){
-   if(done.has(f.path))continue; // 前回取り込み済みだが削除に失敗したもの
-   const blob=await ghApi(cfg,base+'/git/blobs/'+f.sha);
-   const bin=atob(blob.content.replace(/\n/g,''));const u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-   const mm=f.path.startsWith(OEKAKI_INBOX+'mindmap/'); // マインドマップからの送信はサブフォルダに入る
-   const name=(f.path.slice(OEKAKI_INBOX.length+(mm?'mindmap/'.length:0)).replace(/^\d+-/,'').replace(/\.png$/i,'')||(mm?'マインドマップ':'お絵かき')).slice(0,100);
-   const sec=receiveSection(mm?RECEIVE_SECTION_MM:RECEIVE_SECTION);if(!sec)break;const pg=createPageIn(sec.id,name);if(!pg)break;
-   await insertImages([new File([u8],name+'.png',{type:'image/png'})],null);
-   done.add(f.path);saveOekakiDone(done);count++;
-  }
-  // 取り込んだファイルを GitHub から消す（同時に別のコミットが入っていたら次回に持ち越す）
-  try{
-   const newTree=await ghApi(cfg,base+'/git/trees',{method:'POST',body:JSON.stringify({base_tree:commit.tree.sha,tree:files.map(f=>({path:f.path,mode:'100644',type:'blob',sha:null}))})});
-   const c2=await ghApi(cfg,base+'/git/commits',{method:'POST',body:JSON.stringify({message:'yohaku-note received '+files.length+' image(s)',tree:newTree.sha,parents:[head]})});
-   await ghApi(cfg,base+'/git/refs/heads/'+encodeURIComponent(branch),{method:'PATCH',body:JSON.stringify({sha:c2.sha,force:false})});
-   const d=oekakiDone();for(const f of files)d.delete(f.path);saveOekakiDone(d);
-  }catch(e){console.warn('inbox cleanup',e);}
-  if(count){message('画像を'+count+'枚受け取り、「'+RECEIVE_NOTEBOOK+'」に保存しました。');say('受け取り: '+count+'枚（'+new Date().toLocaleTimeString()+'）');}
-  else if(manual)say('新しい画像はありません');
- }catch(e){console.warn('oekaki github',e);if(manual)say('受け取りに失敗: '+e.message);}
- finally{fetchingOekaki=false;}
-}
-function setupOekakiGitHub(){
- const cfg=oekakiGhConfig()||{};
- $('oekaki-token').value=cfg.token||'';$('oekaki-owner').value=cfg.owner||'';$('oekaki-repo').value=cfg.repo||'';$('oekaki-branch').value=cfg.branch||'main';
- $('oekaki-save').onclick=()=>{
-  const c={token:$('oekaki-token').value.trim(),owner:$('oekaki-owner').value.trim(),repo:$('oekaki-repo').value.trim(),branch:$('oekaki-branch').value.trim()||'main'};
-  try{localStorage.setItem(OEKAKI_GH_KEY,JSON.stringify(c));}catch{}
-  updateOekakiBadge();$('oekaki-status').textContent=c.token?'保存しました。確認しています…':'設定を消しました';
-  if(c.token)fetchOekakiFromGitHub(true);
- };
- $('oekaki-fetch').onclick=()=>fetchOekakiFromGitHub(true);
- updateOekakiBadge();
-}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)fetchOekakiFromGitHub();});
-window.addEventListener('focus',()=>fetchOekakiFromGitHub());
-// 診断: ?diag を付けて開くと、受け取り機能の状態を表示する
-async function oekakiDiag(){
- let n='?';try{const idb=await openOekakiInbox();n=await new Promise((res,rej)=>{const q=idb.transaction('inbox','readonly').objectStore('inbox').count();q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});idb.close();}catch(e){n='エラー '+e.message;}
- const ua=/Edg\//.test(navigator.userAgent)?'Edge':/Chrome\//.test(navigator.userAgent)?'Chrome':/Safari\//.test(navigator.userAgent)?'Safari':'その他';
- message('【診断】受け取り機能: 有効(版 3) / ブラウザ: '+ua+' / アプリ表示: '+(isStandaloneApp()?'はい':'いいえ')+' / 受け渡し箱の画像: '+n+' 枚');
-}
 // ---- pointer handling on the sheet ----
 sheet.tabIndex=-1;
 // Pen proximity: while a pen hovers over or touches the page, mark the sheet so CSS turns off
@@ -1046,7 +907,7 @@ function penNear(e) {
 for(const ev of ['pointerover','pointerenter','pointermove','pointerdown'])sheet.addEventListener(ev,penNear,{capture:true,passive:true});
 sheet.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'){clearTimeout(penNearTimer);penNearTimer=setTimeout(()=>sheet.classList.remove('pen-near'),400);}});
 sheet.addEventListener('pointerdown',e=>{
- if(!ready)return;
+ if(!ready||pinchActive)return;
  if(gesture){if(gesture.id===e.pointerId)return;finish();}
  const t=e.target instanceof Element?e.target:null;
  const grip=t?.closest('.grip'),resize=t?.closest('.resize'),blockEl=t?.closest('.block');
@@ -1171,12 +1032,31 @@ const stylusTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType==='stylus')
 const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 if(isIOS)document.body.classList.add('ios');
 const activeGesture=()=>gesture&&['ink','lasso','marquee','drag','move','resize'].includes(gesture.type);
+// While the pen is writing (and for 1.5 s after it last touched), a palm or finger landing on the page
+// must not scroll it: the hand usually rests on the glass before the pen tip arrives, which moved the page
+// up and down mid-word on iPad. A wide contact (radius >= 22 px) is treated as a palm straight away.
+let lastPenAt=-1e9;
+for(const ev of ['pointerdown','pointermove'])document.addEventListener(ev,e=>{if(e.pointerType==='pen')lastPenAt=performance.now();},{capture:true,passive:true});
+const inkToolNow=()=>tool==='pen'||tool==='eraser'||tool==='select'||(tool==='text'&&$('auto-pen').checked);
+const palmTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType!=='stylus'&&Math.max(t.radiusX||0,t.radiusY||0)>=22);
+const penBusy=()=>activeGesture()||performance.now()-lastPenAt<1500;
+let pinchActive=false;
 sheet.addEventListener('touchstart',e=>{
- if(!ready||document.body.classList.contains('reading'))return;
- const inkTool=tool==='pen'||tool==='eraser'||tool==='select'||(tool==='text'&&$('auto-pen').checked);
- if((stylusTouch(e)&&inkTool)||activeGesture())e.preventDefault();
+ if(!ready||document.body.classList.contains('reading')||e.touches.length>=2)return;
+ const inkTool=inkToolNow();
+ if((stylusTouch(e)&&inkTool)||activeGesture()||(inkTool&&(penBusy()||palmTouch(e))))e.preventDefault();
 },{passive:false});
-sheet.addEventListener('touchmove',e=>{if(activeGesture())e.preventDefault();},{passive:false});
+sheet.addEventListener('touchmove',e=>{if(e.touches.length>=2)return;if(activeGesture()||(inkToolNow()&&penBusy()))e.preventDefault();},{passive:false});
+// the same for touches that land outside the sheet (page margins, headings) while writing; controls stay tappable
+const controlTouch=e=>e.target instanceof Element&&!!e.target.closest('button,select,input,label,a,summary,.toolbar,.topbar,.sidebar,.layer-panel,.view-strip');
+document.addEventListener('touchstart',e=>{
+ if(!ready||document.body.classList.contains('reading')||e.touches.length>=2||controlTouch(e)||sheet.contains(e.target))return;
+ if(inkToolNow()&&(penBusy()||palmTouch(e)))e.preventDefault();
+},{passive:false});
+document.addEventListener('touchmove',e=>{
+ if(!ready||document.body.classList.contains('reading')||e.touches.length>=2||controlTouch(e)||sheet.contains(e.target))return;
+ if(inkToolNow()&&penBusy())e.preventDefault();
+},{passive:false});
 for(const event of ['touchend','touchcancel'])sheet.addEventListener(event,e=>{
  if(gesture&&stylusTouch(e)&&e.touches.length===0){const id=gesture.id;setTimeout(()=>{if(gesture&&gesture.id===id)finish();},80);}
 });
@@ -1582,9 +1462,6 @@ async function start() {
   if(saved&&saved.version!==1)setStatus('保存済み');else changed();
   if('serviceWorker' in navigator)setupServiceWorker();
   syncBoot();
-  importFromOekaki();
-  setupOekakiGitHub();fetchOekakiFromGitHub();
-  if(new URLSearchParams(location.search).has('diag'))oekakiDiag();
  }catch(error){
   message('メモを開けませんでした。元の保存データを上書きせず停止しています。ブラウザの保存設定を確認し、再読み込みしてください。 '+error.message);
   setStatus('読み込み停止',true);
@@ -1674,14 +1551,47 @@ function initializePresentation(){
  $('layer-close').onclick=()=>{setLayers(false);$('layers-toggle').focus();};
  let layersPref=null;try{layersPref=localStorage.getItem('yohaku-layers-open');}catch{}
  setLayers(layersPref==='1'||(layersPref===null&&innerWidth>1180),false);placePanelDefault();
- const zoom=$('view-zoom');
- try{const saved=localStorage.getItem('yohaku-view-zoom');if(['fit','.75','1','1.25'].includes(saved))zoom.value=saved;}catch{}
+ const zoom=$('view-zoom'),ZOOM_MIN=0.4,ZOOM_MAX=3;
+ // a hidden "custom" entry shows the percentage reached by pinching
+ const customOpt=document.createElement('option');customOpt.value='custom';customOpt.hidden=true;zoom.append(customOpt);
+ let customZoom=1;
+ const setCustomZoom=z=>{customZoom=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));customOpt.hidden=false;customOpt.textContent=Math.round(customZoom*100)+'%';zoom.value='custom';};
+ try{const saved=localStorage.getItem('yohaku-view-zoom');if(['fit','.75','1','1.25'].includes(saved))zoom.value=saved;else if(saved&&Number.isFinite(+saved))setCustomZoom(+saved);}catch{}
+ const zoomFactor=()=>zoom.value==='fit'?null:zoom.value==='custom'?customZoom:Number(zoom.value);
  function applyZoom(){
-  finish();paper.style.width=zoom.value==='fit'?'100%':(W*Number(zoom.value))+'px';
+  finish();const z=zoomFactor();paper.style.width=z===null?'100%':(W*z)+'px';
   $('paper-viewport').scrollLeft=0;layout();
-  try{localStorage.setItem('yohaku-view-zoom',zoom.value);}catch{}
+  try{localStorage.setItem('yohaku-view-zoom',zoom.value==='custom'?String(customZoom):zoom.value);}catch{}
  }
- zoom.onchange=applyZoom;applyZoom();
+ zoom.onchange=()=>{if(zoom.value!=='custom')customOpt.hidden=true;applyZoom();};applyZoom();
+ // Two-finger pinch on the page: zoom around the fingers. Handled with touch events (default-prevented) so
+ // it works whatever touch-action the sheet has, and the browser never zooms the whole app instead.
+ const vp=$('paper-viewport');let pinch=null,pinchRaf=0,pinchTarget=0;
+ const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+ const center=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
+ function anchorTo(cx,cy){ // keep the page point under the fingers where it is
+  const z=paper.clientWidth/W,r=vp.getBoundingClientRect();
+  vp.scrollLeft=pinch.px*z-(cx-r.left);
+  const want=cy-pinch.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
+ }
+ vp.addEventListener('touchstart',e=>{
+  if(e.touches.length!==2)return;
+  e.preventDefault();finish();pinchActive=true;
+  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t),r=vp.getBoundingClientRect(),z0=paper.clientWidth/W,top=sheet.getBoundingClientRect().top;
+  pinch={d0:dist(t),z0,px:(vp.scrollLeft+cx-r.left)/z0,py:(cy-top)/z0};
+ },{passive:false});
+ vp.addEventListener('touchmove',e=>{
+  if(!pinch||e.touches.length<2)return;e.preventDefault();
+  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t);pinchTarget=pinch.z0*dist(t)/pinch.d0;
+  if(pinchRaf)return;
+  pinchRaf=requestAnimationFrame(()=>{pinchRaf=0;if(!pinch)return;setCustomZoom(pinchTarget);paper.style.width=(W*customZoom)+'px';layout();anchorTo(cx,cy);});
+ },{passive:false});
+ for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,e=>{
+  if(!pinch||e.touches.length>=2)return;
+  pinch=null;pinchActive=false;if(pinchRaf){cancelAnimationFrame(pinchRaf);pinchRaf=0;}
+  setCustomZoom(pinchTarget||customZoom);paper.style.width=(W*customZoom)+'px';layout();
+  try{localStorage.setItem('yohaku-view-zoom',String(customZoom));}catch{}
+ });
  $('view-pan').onclick=()=>setReading(!document.body.classList.contains('reading'));
  // Ancestor capture runs before the existing drawing handlers. Native touch
  // scrolling remains enabled; no note content is changed in reading mode.

@@ -142,7 +142,7 @@ input[type=checkbox]{accent-color:#416d5f}
 .history button{padding:7px}
 .paper-caption{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 8px;font-size:11px;color:#7d8a7c;letter-spacing:.3px}
 .paper{position:relative;background:white;border:1px solid #e1e6de;border-radius:9px;overflow:hidden;box-shadow:0 8px 30px #203b2906;min-height:200px}
-.sheet{position:absolute;left:0;top:0;width:1200px;height:1200px;transform-origin:0 0;background-image:radial-gradient(#dce5dc .8px,transparent .8px);background-size:24px 24px;cursor:text;touch-action:pan-y pinch-zoom}
+.sheet{position:absolute;left:0;top:0;width:1200px;height:1200px;transform-origin:0 0;background-image:radial-gradient(#dce5dc .8px,transparent .8px);background-size:24px 24px;cursor:text;touch-action:pan-y}
 .sheet:focus{outline:none}
 .sheet{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .block .editor{-webkit-user-select:text;user-select:text}
@@ -336,9 +336,9 @@ input[type=checkbox]{width:18px;height:18px;margin:0;accent-color:#527e55}
 #tool-hint{flex:1;min-width:0}#input-status{white-space:nowrap;flex-shrink:0;font-size:10px;color:#91a08b}
 .paper-viewport{width:100%;max-width:100%;overflow:auto;overscroll-behavior-x:contain;border:1px solid #dae2d4;border-radius:12px;background:#fff;box-shadow:0 5px 24px #315d4f04;-webkit-overflow-scrolling:touch}
 .paper{width:1200px;margin:0;border:0;border-radius:0;box-shadow:none;min-height:300px;flex-shrink:0}
-.sheet{background-image:none;touch-action:pan-x pan-y pinch-zoom}
+.sheet{background-image:none;touch-action:pan-x pan-y}
 .sheet.ink{background-image:radial-gradient(#dce5d8 .7px,transparent .7px);background-size:24px 24px;touch-action:none}
-body.reading .sheet,body.reading .sheet.ink,body.reading .sheet.select{touch-action:pan-x pan-y pinch-zoom;cursor:grab}
+body.reading .sheet,body.reading .sheet.ink,body.reading .sheet.select{touch-action:pan-x pan-y;cursor:grab}
 body.reading .block{pointer-events:none}
 body.reading .block-bar,body.reading .resize{display:none}
 .block .editor{color:#263c32}
@@ -436,7 +436,7 @@ button,summary{-webkit-tap-highlight-color:transparent}
 @media(max-width:700px){.modes button{padding:8px 9px;font-size:12px}.group-label{display:none}}
 
 /* iPad: finger scrolls, Apple Pencil draws (see touchstart handling in app.mjs) */
-body.ios .sheet.ink,body.ios .sheet.select{touch-action:pan-x pan-y pinch-zoom}
+body.ios .sheet.ink,body.ios .sheet.select{touch-action:pan-x pan-y}
 body.ios .sheet.select .block{touch-action:none}
 
 
@@ -463,7 +463,7 @@ body.ios .sheet.select .block{touch-action:none}
 
 /* Fingers scroll and pinch-zoom even in pen/eraser/select mode; only while a pen is near the
    screen (hover or contact) is touch handling switched off so the pen never pans the page. */
-.sheet.ink,.sheet.select{touch-action:pan-x pan-y pinch-zoom}
+.sheet.ink,.sheet.select{touch-action:pan-x pan-y}
 .sheet.ink.pen-near,.sheet.select.pen-near{touch-action:none}
 .sheet.select .block{touch-action:none}
 
@@ -697,3 +697,18 @@ body .multi-bar button[hidden]{display:none}
  .view-strip{gap:6px}
  .paper-caption{display:none}
 }
+
+/* ---------- tablet (iPad mini portrait etc.): tool rows wrap instead of running off the right edge ---------- */
+@media(max-width:1180px){
+ body .toolbar{max-width:100%;overflow:hidden}
+ body .toolbar-primary{flex-wrap:wrap;row-gap:6px}
+ body .modes{flex-wrap:wrap}
+ body .history{margin-left:auto}
+ body .text-tools,body .tool-group{max-width:100%;flex-wrap:wrap}
+ body .view-strip,body .view-actions{flex-wrap:wrap;row-gap:6px}
+ body .view-actions label{white-space:nowrap}
+ body .view-note{flex:1 0 100%}
+}
+/* the app zooms the page itself with two fingers (see pinch handling); the browser must not zoom the whole screen.
+   On iPad the pen-near rule must beat the iOS finger-scroll rule, otherwise a palm scrolls the page mid-stroke. */
+body.ios .sheet.ink.pen-near,body.ios .sheet.select.pen-near{touch-action:none}

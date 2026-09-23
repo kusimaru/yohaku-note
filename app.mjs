@@ -1581,30 +1581,42 @@ function initializePresentation(){
  zoom.onchange=()=>{if(zoom.value!=='custom')customOpt.hidden=true;applyZoom();};applyZoom();
  // Two-finger pinch on the page: zoom around the fingers. Handled with touch events (default-prevented) so
  // it works whatever touch-action the sheet has, and the browser never zooms the whole app instead.
- const vp=$('paper-viewport');let pinch=null,pinchRaf=0,pinchTarget=0;
+ const vp=$('paper-viewport');let pinch=null,pinchRaf=0,pinchTarget=0,pinchCx=0,pinchCy=0;
  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
  const center=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
+ const clampZoom=z=>Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));
  function anchorTo(cx,cy){ // keep the page point under the fingers where it is
   const z=paper.clientWidth/pw(page()),r=vp.getBoundingClientRect();
   vp.scrollLeft=pinch.px*z-(cx-r.left);
   const want=cy-pinch.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
  }
+ // While the fingers move, only a CSS transform of the paper changes (GPU, no reflow, no ink redraw),
+ // so the motion is smooth. The real re-layout at the new zoom happens once, when the fingers lift.
  vp.addEventListener('touchstart',e=>{
   if(e.touches.length!==2)return;
   e.preventDefault();finish();pinchActive=true;
-  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t),r=vp.getBoundingClientRect(),z0=paper.clientWidth/pw(page()),top=sheet.getBoundingClientRect().top;
-  pinch={d0:dist(t),z0,px:(vp.scrollLeft+cx-r.left)/z0,py:(cy-top)/z0};
+  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t),r=vp.getBoundingClientRect(),z0=paper.clientWidth/pw(page()),top=sheet.getBoundingClientRect().top,pr=paper.getBoundingClientRect();
+  pinch={d0:dist(t),z0,px:(vp.scrollLeft+cx-r.left)/z0,py:(cy-top)/z0,cx0:cx,cy0:cy,lx:cx-pr.left,ly:cy-pr.top};
+  pinchTarget=z0;pinchCx=cx;pinchCy=cy;
+  paper.style.transformOrigin='0 0';paper.style.willChange='transform';vp.style.overflow='hidden';
  },{passive:false});
  vp.addEventListener('touchmove',e=>{
   if(!pinch||e.touches.length<2)return;e.preventDefault();
-  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t);pinchTarget=pinch.z0*dist(t)/pinch.d0;
+  const t=[e.touches[0],e.touches[1]];[pinchCx,pinchCy]=center(t);pinchTarget=clampZoom(pinch.z0*dist(t)/pinch.d0);
   if(pinchRaf)return;
-  pinchRaf=requestAnimationFrame(()=>{pinchRaf=0;if(!pinch)return;setCustomZoom(pinchTarget);layout();anchorTo(cx,cy);});
+  pinchRaf=requestAnimationFrame(()=>{
+   pinchRaf=0;if(!pinch)return;
+   const f=pinchTarget/pinch.z0,dx=(pinchCx-pinch.cx0)+pinch.lx*(1-f),dy=(pinchCy-pinch.cy0)+pinch.ly*(1-f);
+   paper.style.transform='translate('+dx.toFixed(1)+'px,'+dy.toFixed(1)+'px) scale('+f.toFixed(4)+')';
+   customOpt.hidden=false;customOpt.textContent=Math.round(pinchTarget*100)+'%';zoom.value='custom';
+  });
  },{passive:false});
  for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,e=>{
   if(!pinch||e.touches.length>=2)return;
-  pinch=null;pinchActive=false;if(pinchRaf){cancelAnimationFrame(pinchRaf);pinchRaf=0;}
-  setCustomZoom(pinchTarget||customZoom);layout();
+  if(pinchRaf){cancelAnimationFrame(pinchRaf);pinchRaf=0;}
+  paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';
+  setCustomZoom(pinchTarget||customZoom);layout();anchorTo(pinchCx,pinchCy);
+  pinch=null;pinchActive=false;
   try{localStorage.setItem('yohaku-view-zoom',String(customZoom));}catch{}
  });
  $('view-pan').onclick=()=>setReading(!document.body.classList.contains('reading'));

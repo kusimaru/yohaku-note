@@ -1609,7 +1609,8 @@ function initializePresentation(){
   updateZoomUi(customZoom);persistZoom();
  }
  // slider: zoom around the middle of what is on screen
- const viewCentre=()=>{const r=vp.getBoundingClientRect();return [r.left+r.width/2,Math.max(r.top,Math.min(r.bottom,innerHeight/2))];};
+ // slider: horizontally around the middle, vertically at the top edge of the visible paper, so the rows above the paper never move
+ const viewCentre=()=>{const r=vp.getBoundingClientRect(),under=document.querySelector('.tools-sticky')?.getBoundingClientRect().bottom||0;return [r.left+r.width/2,Math.max(r.top,Math.min(r.bottom,under))];};
  range.addEventListener('input',()=>{if(!preview){const [cx,cy]=viewCentre();beginPreview(cx,cy);}preview.z=clampZoom(Number(range.value)/100);drawPreview();});
  range.addEventListener('change',()=>{if(preview){preview.z=clampZoom(Number(range.value)/100);endPreview();}else{setCustomZoom(Number(range.value)/100);applyZoom();}});
  // two-finger pinch on the page

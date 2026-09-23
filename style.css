@@ -722,3 +722,9 @@ body .zoom-fit{padding:6px 12px;min-height:40px}
 .view-actions label,.zoom-fit,.view-actions .group-label{white-space:nowrap}
 .view-strip{flex-wrap:wrap;row-gap:8px}
 .view-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
+/* ---------- the tool rows (tools + view/zoom row) stay pinned under the top bar while the page scrolls or zooms ---------- */
+body .toolbar{position:static;top:auto}
+.tools-sticky{position:sticky;top:72px;z-index:30;background:#f3f5f1;padding-bottom:6px;margin-bottom:6px}
+@media(max-width:700px){.tools-sticky{top:56px}}
+.tools-sticky .view-strip{margin-top:8px}

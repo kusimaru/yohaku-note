@@ -1562,62 +1562,70 @@ function initializePresentation(){
  $('layer-close').onclick=()=>{setLayers(false);$('layers-toggle').focus();};
  let layersPref=null;try{layersPref=localStorage.getItem('yohaku-layers-open');}catch{}
  setLayers(layersPref==='1'||(layersPref===null&&innerWidth>1180),false);placePanelDefault();
- const zoom=$('view-zoom'),ZOOM_MIN=0.4,ZOOM_MAX=3;
- // a hidden "custom" entry shows the percentage reached by pinching
- const customOpt=document.createElement('option');customOpt.value='custom';customOpt.hidden=true;zoom.append(customOpt);
- let customZoom=1;
- const setCustomZoom=z=>{customZoom=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));customOpt.hidden=false;customOpt.textContent=Math.round(customZoom*100)+'%';zoom.value='custom';};
- try{const saved=localStorage.getItem('yohaku-view-zoom');if(['fit','.75','1','1.25'].includes(saved))zoom.value=saved;else if(saved&&Number.isFinite(+saved))setCustomZoom(+saved);}catch{}
- const zoomFactor=()=>zoom.value==='fit'?null:zoom.value==='custom'?customZoom:Number(zoom.value);
+ // ---- zoom: a slider (40-300 %) plus a "fit the width" button; two-finger pinch drives the same state ----
+ const ZOOM_MIN=0.4,ZOOM_MAX=3,range=$('zoom-range'),fitBtn=$('zoom-fit'),zoomLabel=$('zoom-value'),vp=$('paper-viewport');
+ let zoomMode='fit',customZoom=1;
+ const clampZoom=z=>Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));
+ const setCustomZoom=z=>{customZoom=clampZoom(z);zoomMode='custom';};
+ const updateZoomUi=z=>{ // z = factor to show; null = whatever "fit" currently gives
+  if(!doc)return;
+  const shown=z===null?paper.clientWidth/pw(page()):z,pct=Math.round(shown*100);
+  range.value=String(pct);zoomLabel.textContent=pct+'%';fitBtn.setAttribute('aria-pressed',String(zoomMode==='fit'));
+ };
+ try{const saved=localStorage.getItem('yohaku-view-zoom');if(saved==='fit')zoomMode='fit';else if(saved&&Number.isFinite(+saved))setCustomZoom(+saved);}catch{}
+ const zoomFactor=()=>zoomMode==='fit'?null:customZoom;
  sizePaper=()=>{
   const z=zoomFactor(),width=pw(page());
-  paper.style.width=z===null?(width===W?'100%':Math.round($('paper-viewport').clientWidth*width/W)+'px'):(width*z)+'px';
+  paper.style.width=z===null?(width===W?'100%':Math.round(vp.clientWidth*width/W)+'px'):(width*z)+'px';
+  updateZoomUi(z); // the slider shows the effective factor, also after page switches and window resizes
  };
- window.addEventListener('resize',()=>{if(zoomFactor()===null&&pw(page())!==W)layout();});
- function applyZoom(){
-  finish();$('paper-viewport').scrollLeft=0;layout();
-  try{localStorage.setItem('yohaku-view-zoom',zoom.value==='custom'?String(customZoom):zoom.value);}catch{}
+ const persistZoom=()=>{try{localStorage.setItem('yohaku-view-zoom',zoomMode==='fit'?'fit':String(customZoom));}catch{}};
+ window.addEventListener('resize',()=>{if(zoomFactor()===null){if(pw(page())!==W)layout();updateZoomUi(null);}});
+ function applyZoom(){finish();vp.scrollLeft=0;layout();updateZoomUi(zoomFactor());persistZoom();}
+ fitBtn.onclick=()=>{zoomMode='fit';applyZoom();};
+ applyZoom();
+ // Live preview shared by the slider and the pinch: while the value changes only a CSS transform of the
+ // paper moves (GPU, no reflow, no ink redraw), keeping the page point under the fingers / screen centre
+ // still. The real re-layout at the new zoom happens once, at the end.
+ let preview=null,previewRaf=0;
+ function beginPreview(cx,cy){
+  finish();const r=vp.getBoundingClientRect(),z0=paper.clientWidth/pw(page()),top=sheet.getBoundingClientRect().top,pr=paper.getBoundingClientRect();
+  preview={z0,z:z0,px:(vp.scrollLeft+cx-r.left)/z0,py:(cy-top)/z0,cx0:cx,cy0:cy,cx,cy,lx:cx-pr.left,ly:cy-pr.top};
+  paper.style.transformOrigin='0 0';paper.style.willChange='transform';vp.style.overflow='hidden';
  }
- zoom.onchange=()=>{if(zoom.value!=='custom')customOpt.hidden=true;applyZoom();};applyZoom();
- // Two-finger pinch on the page: zoom around the fingers. Handled with touch events (default-prevented) so
- // it works whatever touch-action the sheet has, and the browser never zooms the whole app instead.
- const vp=$('paper-viewport');let pinch=null,pinchRaf=0,pinchTarget=0,pinchCx=0,pinchCy=0;
+ function drawPreview(){
+  if(previewRaf)return;
+  previewRaf=requestAnimationFrame(()=>{previewRaf=0;if(!preview)return;
+   const f=preview.z/preview.z0,dx=(preview.cx-preview.cx0)+preview.lx*(1-f),dy=(preview.cy-preview.cy0)+preview.ly*(1-f);
+   paper.style.transform='translate('+dx.toFixed(1)+'px,'+dy.toFixed(1)+'px) scale('+f.toFixed(4)+')';
+   zoomMode='custom';updateZoomUi(preview.z);});
+ }
+ function endPreview(){
+  if(!preview)return;if(previewRaf){cancelAnimationFrame(previewRaf);previewRaf=0;}
+  const pv=preview;preview=null;paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';
+  setCustomZoom(pv.z);layout();
+  const z=paper.clientWidth/pw(page()),r=vp.getBoundingClientRect();vp.scrollLeft=pv.px*z-(pv.cx-r.left);
+  const want=pv.cy-pv.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
+  updateZoomUi(customZoom);persistZoom();
+ }
+ // slider: zoom around the middle of what is on screen
+ const viewCentre=()=>{const r=vp.getBoundingClientRect();return [r.left+r.width/2,Math.max(r.top,Math.min(r.bottom,innerHeight/2))];};
+ range.addEventListener('input',()=>{if(!preview){const [cx,cy]=viewCentre();beginPreview(cx,cy);}preview.z=clampZoom(Number(range.value)/100);drawPreview();});
+ range.addEventListener('change',()=>{if(preview){preview.z=clampZoom(Number(range.value)/100);endPreview();}else{setCustomZoom(Number(range.value)/100);applyZoom();}});
+ // two-finger pinch on the page
  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
- const center=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
- const clampZoom=z=>Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,z));
- function anchorTo(cx,cy){ // keep the page point under the fingers where it is
-  const z=paper.clientWidth/pw(page()),r=vp.getBoundingClientRect();
-  vp.scrollLeft=pinch.px*z-(cx-r.left);
-  const want=cy-pinch.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
- }
- // While the fingers move, only a CSS transform of the paper changes (GPU, no reflow, no ink redraw),
- // so the motion is smooth. The real re-layout at the new zoom happens once, when the fingers lift.
+ const centre=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
+ let pinchD0=0;
  vp.addEventListener('touchstart',e=>{
   if(e.touches.length!==2)return;
-  e.preventDefault();finish();pinchActive=true;
-  const t=[e.touches[0],e.touches[1]],[cx,cy]=center(t),r=vp.getBoundingClientRect(),z0=paper.clientWidth/pw(page()),top=sheet.getBoundingClientRect().top,pr=paper.getBoundingClientRect();
-  pinch={d0:dist(t),z0,px:(vp.scrollLeft+cx-r.left)/z0,py:(cy-top)/z0,cx0:cx,cy0:cy,lx:cx-pr.left,ly:cy-pr.top};
-  pinchTarget=z0;pinchCx=cx;pinchCy=cy;
-  paper.style.transformOrigin='0 0';paper.style.willChange='transform';vp.style.overflow='hidden';
+  e.preventDefault();pinchActive=true;const t=[e.touches[0],e.touches[1]],[cx,cy]=centre(t);pinchD0=dist(t);beginPreview(cx,cy);
  },{passive:false});
  vp.addEventListener('touchmove',e=>{
-  if(!pinch||e.touches.length<2)return;e.preventDefault();
-  const t=[e.touches[0],e.touches[1]];[pinchCx,pinchCy]=center(t);pinchTarget=clampZoom(pinch.z0*dist(t)/pinch.d0);
-  if(pinchRaf)return;
-  pinchRaf=requestAnimationFrame(()=>{
-   pinchRaf=0;if(!pinch)return;
-   const f=pinchTarget/pinch.z0,dx=(pinchCx-pinch.cx0)+pinch.lx*(1-f),dy=(pinchCy-pinch.cy0)+pinch.ly*(1-f);
-   paper.style.transform='translate('+dx.toFixed(1)+'px,'+dy.toFixed(1)+'px) scale('+f.toFixed(4)+')';
-   customOpt.hidden=false;customOpt.textContent=Math.round(pinchTarget*100)+'%';zoom.value='custom';
-  });
+  if(!preview||!pinchActive||e.touches.length<2)return;e.preventDefault();
+  const t=[e.touches[0],e.touches[1]];[preview.cx,preview.cy]=centre(t);preview.z=clampZoom(preview.z0*dist(t)/pinchD0);drawPreview();
  },{passive:false});
  for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,e=>{
-  if(!pinch||e.touches.length>=2)return;
-  if(pinchRaf){cancelAnimationFrame(pinchRaf);pinchRaf=0;}
-  paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';
-  setCustomZoom(pinchTarget||customZoom);layout();anchorTo(pinchCx,pinchCy);
-  pinch=null;pinchActive=false;
-  try{localStorage.setItem('yohaku-view-zoom',String(customZoom));}catch{}
+  if(!pinchActive||e.touches.length>=2)return;pinchActive=false;endPreview();
  });
  $('view-pan').onclick=()=>setReading(!document.body.classList.contains('reading'));
  // Ancestor capture runs before the existing drawing handlers. Native touch

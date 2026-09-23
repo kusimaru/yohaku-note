@@ -712,3 +712,9 @@ body .multi-bar button[hidden]{display:none}
 /* the app zooms the page itself with two fingers (see pinch handling); the browser must not zoom the whole screen.
    On iPad the pen-near rule must beat the iOS finger-scroll rule, otherwise a palm scrolls the page mid-stroke. */
 body.ios .sheet.ink.pen-near,body.ios .sheet.select.pen-near{touch-action:none}
+
+/* ---------- zoom slider ---------- */
+body .zoom-range{width:170px;height:30px;accent-color:#4e8068;cursor:pointer}
+.zoom-value{min-width:3.4em;text-align:right;font-weight:700;color:#3f5a50;font-variant-numeric:tabular-nums}
+body .zoom-fit{padding:6px 12px;min-height:40px}
+@media(max-width:700px){body .zoom-range{width:120px}}

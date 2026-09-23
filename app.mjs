@@ -1578,13 +1578,22 @@ function initializePresentation(){
   range.value=String(pct);zoomLabel.textContent=pct+'%';fitBtn.setAttribute('aria-pressed',String(zoomMode==='fit'));
  };
  try{const saved=localStorage.getItem('yohaku-view-zoom');if(saved==='fit')zoomMode='fit';else if(saved&&Number.isFinite(+saved))setCustomZoom(+saved);}catch{}
+ // each section remembers its own zoom (on this device); the global value is the default for sections not seen yet
+ let zoomBySection={},lastZoomSection=null;
+ try{const m=JSON.parse(localStorage.getItem('yohaku-view-zoom-sections')||'{}');if(m&&typeof m==='object')zoomBySection=m;}catch{}
+ const rememberSectionZoom=()=>{if(!doc)return;const sec=currentSection().id;zoomBySection[sec]=zoomMode==='fit'?'fit':customZoom;const keys=Object.keys(zoomBySection);if(keys.length>300)for(const k of keys.slice(0,keys.length-300))delete zoomBySection[k];try{localStorage.setItem('yohaku-view-zoom-sections',JSON.stringify(zoomBySection));}catch{}};
+ const recallSectionZoom=()=>{ // called on every layout: when the section on screen changes, switch to its zoom
+  if(!doc)return;const sec=currentSection().id;if(sec===lastZoomSection)return;lastZoomSection=sec;
+  const z=zoomBySection[sec];if(z==='fit')zoomMode='fit';else if(Number.isFinite(+z)&&z!==undefined&&z!==null)setCustomZoom(+z);
+ };
  const zoomFactor=()=>zoomMode==='fit'?null:customZoom;
  sizePaper=()=>{
+  recallSectionZoom();
   const z=zoomFactor(),width=pw(page());
   paper.style.width=z===null?(width===W?'100%':Math.round(vp.clientWidth*width/W)+'px'):(width*z)+'px';
   updateZoomUi(z); // the slider shows the effective factor, also after page switches and window resizes
  };
- const persistZoom=()=>{try{localStorage.setItem('yohaku-view-zoom',zoomMode==='fit'?'fit':String(customZoom));}catch{}};
+ const persistZoom=()=>{try{localStorage.setItem('yohaku-view-zoom',zoomMode==='fit'?'fit':String(customZoom));}catch{}rememberSectionZoom();};
  window.addEventListener('resize',()=>{if(!doc)return;if(zoomFactor()===null){if(pw(page())!==W)layout();updateZoomUi(null);}});
  function applyZoom(){finish();vp.scrollLeft=0;layout();updateZoomUi(zoomFactor());persistZoom();}
  fitBtn.onclick=()=>{zoomMode='fit';applyZoom();};

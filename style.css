@@ -831,3 +831,7 @@ body .media-view audio{height:44px}
 
 .media-remove{color:#a2363b}
 .media-remove:hover:not(:disabled){background:#fbe9e7}
+
+.media-folder{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+.media-folder button{width:100%;justify-content:flex-start;text-align:left;font-size:var(--ui-fs-sm);min-height:40px}
+#media-folder-status{margin:2px 0}

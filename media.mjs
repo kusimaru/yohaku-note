@@ -12,7 +12,26 @@ async function withStore(mode,fn){const db=await openMediaDb();try{const tx=db.t
 export const putMedia=(id,record)=>withStore('readwrite',s=>req(s,x=>x.put(record,id)));
 export const getMedia=id=>withStore('readonly',s=>req(s,x=>x.get(id)));
 export const deleteMedia=id=>withStore('readwrite',s=>req(s,x=>x.delete(id)));
-export const listMediaIds=()=>withStore('readonly',s=>req(s,x=>x.getAllKeys()));
+export const listMediaIds=()=>withStore('readonly',s=>req(s,x=>x.getAllKeys())).then(ids=>ids.filter(id=>!String(id).startsWith('__')));
+// ---- optional folder on the PC (File System Access API, Edge/Chrome): recordings are also written there as files ----
+const DIR_KEY='__settings:mediaDir';
+export const getMediaDir=()=>withStore('readonly',s=>req(s,x=>x.get(DIR_KEY))).catch(()=>null);
+export const setMediaDir=h=>withStore('readwrite',s=>req(s,x=>h?x.put(h,DIR_KEY):x.delete(DIR_KEY)));
+export const folderSupported=()=>typeof window!=='undefined'&&typeof window.showDirectoryPicker==='function';
+export async function folderPermission(dir,request=false){
+ if(!dir)return 'none';if(typeof dir.queryPermission!=='function')return 'granted';
+ let st=await dir.queryPermission({mode:'readwrite'});
+ if(st==='prompt'&&request)st=await dir.requestPermission({mode:'readwrite'});
+ return st;
+}
+export const safeFileName=n=>String(n||'media').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').replace(/\s+/g,' ').trim().slice(0,80)||'media';
+export async function writeToFolder(dir,baseName,blob,ext=extOf(blob.type)){
+ const base=safeFileName(baseName);let name=base+'.'+ext;
+ for(let i=2;i<1000;i++){try{await dir.getFileHandle(name,{create:false});name=base+'-'+i+'.'+ext;}catch{break;}}
+ const fh=await dir.getFileHandle(name,{create:true}),w=await fh.createWritable();
+ try{await w.write(blob);}finally{await w.close();}
+ return name;
+}
 export async function mediaUsage(){const ids=await listMediaIds();let bytes=0;for(const id of ids){const r=await getMedia(id);bytes+=r?.blob?.size||0;}return {count:ids.length,bytes};}
 
 // ---- camera / recorder ----

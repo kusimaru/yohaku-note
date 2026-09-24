@@ -50,7 +50,8 @@
  <button id="export" disabled><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>バックアップを書き出す</button>
  <button id="import" disabled><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>バックアップを読み込む</button>
  <input type="file" id="import-file" accept=".json,application/json" hidden>
- <button id="transcribe-settings" type="button"><svg class="icon" aria-hidden="true"><use href="#i-text-lines"/></svg>文字起こしの設定（API キー）</button><p class="small" id="media-usage">録音・動画はこの端末にだけ保存されます。</p></details>
+ <button id="transcribe-settings" type="button"><svg class="icon" aria-hidden="true"><use href="#i-text-lines"/></svg>文字起こしの設定（API キー）</button><p class="small" id="media-usage">録音・動画はこの端末にだけ保存されます。</p>
+ <div class="media-folder"><button id="media-folder-pick" type="button" title="録音・動画・カメラ写真を、選んだフォルダーにもファイルとして保存します"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>PCのフォルダーにも保存（フォルダーを選ぶ）</button><p class="small" id="media-folder-status"></p><button id="media-folder-grant" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>フォルダーへの保存を再開（許可する）</button><button id="media-folder-export" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>保存済みの録音・動画をフォルダーへ書き出す</button><button id="media-folder-clear" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>フォルダー保存をやめる</button></div></details>
  </div>
 </aside>
 <button id="nav-backdrop" class="nav-backdrop" aria-label="ページ一覧を閉じる" hidden></button><main>

@@ -2,7 +2,7 @@ import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTe
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
-import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS, APPLE, defaultMime, blobToWav } from './media.mjs';
+import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS, APPLE, defaultMime, blobToWav, getMediaDir, setMediaDir, folderSupported, folderPermission, writeToFolder } from './media.mjs';
 import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
 import { normalizeRuns, runsToText, blockRuns, DEFAULT_TEXT_COLOR, MIN_FONT, MAX_FONT, MAX_LAYERS, ensureLayers, activeLayerOf, addLayer, removeLayer, updateLayer, moveLayer } from './model.mjs';
 const off=document.createElement('canvas'),octx=off.getContext('2d');
@@ -283,7 +283,7 @@ function mediaView(b,host){
  cap.append(name,tr,dl,rm,status);box.append(player,cap);
  getMedia(b.mediaId).then(rec=>{
   if(!rec){host.dataset.missing='1';player.hidden=true;tr.disabled=true;dl.disabled=true;status.textContent='この端末には'+(b.kind==='video'?'動画':'音声')+'がありません（記録した端末で再生できます）';return;}
-  const info=(rec.duration?fmtTime(rec.duration)+'・':'')+Math.round(rec.blob.size/1024/102.4)/10+' MB・'+(rec.blob.type||'形式不明')+'・この端末に保存';
+  const info=(rec.duration?fmtTime(rec.duration)+'・':'')+Math.round(rec.blob.size/1024/102.4)/10+' MB・'+(rec.blob.type||'形式不明')+'・この端末に保存'+(rec.fileName?'・フォルダー: '+rec.fileName:'');
   status.textContent=info;
   let retried=false;
   player.addEventListener('error',async()=>{
@@ -298,10 +298,52 @@ function mediaView(b,host){
  dl.onclick=async()=>{const rec=await getMedia(b.mediaId);if(!rec)return;const a=document.createElement('a');a.href=mediaUrl(b.mediaId,rec.blob);a.download=(b.name||'media').replace(/[\\/:*?"<>|]/g,'_')+'.'+extOf(rec.blob.type);a.click();};
  return box;
 }
+// -- folder on the PC (optional): every new recording/video/photo is also written there --
+let mediaDir=null;
+async function saveToFolder(baseName,blob,ext){
+ if(!mediaDir)return null;
+ try{if(await folderPermission(mediaDir)!=='granted'){renderMediaFolderUi();return null;}return await writeToFolder(mediaDir,baseName,blob,ext);}
+ catch(e){message('フォルダーに保存できませんでした：'+(e.message||e.name));return null;}
+}
+async function renderMediaFolderUi(){
+ const st=$('media-folder-status'),pick=$('media-folder-pick'),grant=$('media-folder-grant'),exp=$('media-folder-export'),clr=$('media-folder-clear');
+ if(!folderSupported()){pick.hidden=true;grant.hidden=true;exp.hidden=true;clr.hidden=true;st.textContent='フォルダーへの保存は PC の Edge／Chrome で使えます（iPad では使えません）。';return;}
+ pick.hidden=false;
+ if(!mediaDir){st.textContent='';grant.hidden=true;exp.hidden=true;clr.hidden=true;return;}
+ const perm=await folderPermission(mediaDir);
+ st.textContent='保存先フォルダー：'+(mediaDir.name||'（選択済み）')+(perm==='granted'?'（保存できます）':'（保存にはもう一度許可が必要です）');
+ grant.hidden=perm==='granted';exp.hidden=false;clr.hidden=false;
+}
+$('media-folder-pick').onclick=async()=>{
+ try{const h=await window.showDirectoryPicker({mode:'readwrite',id:'yohaku-media',startIn:'documents'});await setMediaDir(h);mediaDir=h;message('これからの録音・動画・カメラ写真は「'+h.name+'」にもファイルとして保存します。');}
+ catch(e){if(e.name!=='AbortError')message('フォルダーを選べませんでした：'+(e.message||e.name));}
+ renderMediaFolderUi();
+};
+$('media-folder-grant').onclick=async()=>{try{await folderPermission(mediaDir,true);}catch{}renderMediaFolderUi();};
+$('media-folder-clear').onclick=async()=>{await setMediaDir(null);mediaDir=null;message('フォルダーへの保存をやめました（保存済みのファイルはそのまま残ります）。');renderMediaFolderUi();};
+$('media-folder-export').onclick=async()=>{
+ if(!mediaDir||await folderPermission(mediaDir,true)!=='granted'){renderMediaFolderUi();return;}
+ let n=0;for(const id of await listMediaIds()){const rec=await getMedia(id);if(!rec||rec.fileName)continue;try{rec.fileName=await writeToFolder(mediaDir,rec.name||id,rec.blob);await putMedia(id,rec);n++;}catch{}}
+ message(n?n+' 件をフォルダーへ書き出しました。':'書き出すものはありません（すべて保存済み）。');renderPage();
+};
+// Reading a stored folder handle back can, in rare browser builds, take the page down. A latch in
+// localStorage notices that the previous attempt never finished and drops the setting instead of looping.
+const FOLDER_LATCH='yohaku-folder-loading';
+async function loadMediaDir(){
+ let latched=false;try{latched=localStorage.getItem(FOLDER_LATCH)==='1';}catch{}
+ if(latched){try{localStorage.removeItem(FOLDER_LATCH);}catch{}try{await setMediaDir(null);}catch{}mediaDir=null;await renderMediaFolderUi();message('前回、保存先フォルダーの読み込みに失敗したため、フォルダー保存を解除しました。必要ならもう一度フォルダーを選んでください。');return;}
+ try{localStorage.setItem(FOLDER_LATCH,'1');}catch{}
+ try{mediaDir=(await getMediaDir())||null;}catch{mediaDir=null;}
+ try{localStorage.removeItem(FOLDER_LATCH);}catch{}
+ renderMediaFolderUi();
+}
+loadMediaDir();
+window.__yohaku={setMediaFolder:async(h,persist=true)=>{if(persist)await setMediaDir(h);mediaDir=h;await renderMediaFolderUi();}}; // test hook
 async function addMediaBlock(blob,kind,name,duration){
  if(!ready)return null;
  const id=crypto.randomUUID();
- await putMedia(id,{blob,kind,name,type:blob.type,duration,createdAt:Date.now()});
+ const fileName=await saveToFolder(name,blob);
+ await putMedia(id,{blob,kind,name,type:blob.type,duration,createdAt:Date.now(),fileName});
  const p=page(),w=Math.min(560,pw(p)-128),h=kind==='audio'?128:Math.round(w*9/16)+92;
  const y=nextFreeY(p);
  if(y+h>MAX_HEIGHT){message('ページの下端に空きがありません。新しいページに置いてください。');return null;}
@@ -368,6 +410,7 @@ $('cam-shot').onclick=async()=>{
  if(!camStream)return;
  const file=await takePhoto(camPreview);$('cam-status').textContent='貼り付けました';setTimeout(()=>{if($('cam-status').textContent==='貼り付けました')$('cam-status').textContent='';},1500);
  await insertImages([file]);
+ saveToFolder(file.name.replace(/\.jpg$/,''),file,'jpg');
 };
 $('cam-rec').onclick=()=>{
  if(!camStream)return;

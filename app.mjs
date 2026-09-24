@@ -2,6 +2,7 @@ import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTe
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
+import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS } from './media.mjs';
 import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
 import { normalizeRuns, runsToText, blockRuns, DEFAULT_TEXT_COLOR, MIN_FONT, MAX_FONT, MAX_LAYERS, ensureLayers, activeLayerOf, addLayer, removeLayer, updateLayer, moveLayer } from './model.mjs';
 const off=document.createElement('canvas'),octx=off.getContext('2d');
@@ -267,6 +268,138 @@ function showForm(mode,title,value,submitLabel) {
  const forPage=mode.kind==='rename-page'||mode.kind==='new-page';
  $('new-category-name').placeholder=(forPage?'ページの名前':mode.kind.includes('notebook')?'ノートブックの名前':'セクションの名前')+'（空欄なら「'+DEFAULT_NAME+'」）';$('new-category-name').maxLength=forPage?120:60;
  $('new-category').hidden=false;$('new-category-name').value=value;$('new-category-name').focus();$('new-category-name').select();
+}
+// ---- camera / recording / media blocks / transcription ----
+// Recordings stay on this device (media.mjs); the page only references them by id.
+const objectUrls=new Map();
+function mediaUrl(id,blob){if(!objectUrls.has(id))objectUrls.set(id,URL.createObjectURL(blob));return objectUrls.get(id);}
+function mediaView(b,host){
+ const box=el('div','media-view');
+ const player=document.createElement(b.kind==='video'?'video':'audio');player.controls=true;player.playsInline=true;player.preload='metadata';player.setAttribute('aria-label',b.name||'');
+ const cap=el('div','media-caption'),name=el('span','media-name',b.name||''),status=el('span','media-status','');
+ const tr=el('button','',''),dl=el('button','','');tr.type='button';dl.type='button';tr.append(icon('text-lines'),'文字起こし');dl.append(icon('download'),'書き出し');
+ tr.title='この'+(b.kind==='video'?'動画':'音声')+'を文章にして、下に貼り付けます';dl.title='ファイルとして保存';
+ cap.append(name,tr,dl,status);box.append(player,cap);
+ getMedia(b.mediaId).then(rec=>{
+  if(!rec){host.dataset.missing='1';player.hidden=true;tr.disabled=true;dl.disabled=true;status.textContent='この端末には'+(b.kind==='video'?'動画':'音声')+'がありません（記録した端末で再生できます）';return;}
+  player.src=mediaUrl(b.mediaId,rec.blob);if(rec.duration&&!b.duration)status.textContent='';
+  status.textContent=(rec.duration?fmtTime(rec.duration)+'・':'')+Math.round(rec.blob.size/1024/102.4)/10+' MB・この端末に保存';
+ }).catch(()=>{status.textContent='読み込めませんでした';status.classList.add('error');});
+ tr.onclick=()=>transcribeBlock(b.id,status);
+ dl.onclick=async()=>{const rec=await getMedia(b.mediaId);if(!rec)return;const a=document.createElement('a');a.href=mediaUrl(b.mediaId,rec.blob);a.download=(b.name||'media').replace(/[\\/:*?"<>|]/g,'_')+'.'+extOf(rec.blob.type);a.click();};
+ return box;
+}
+async function addMediaBlock(blob,kind,name,duration){
+ if(!ready)return null;
+ const id=crypto.randomUUID();
+ await putMedia(id,{blob,kind,name,type:blob.type,duration,createdAt:Date.now()});
+ const p=page(),w=Math.min(520,pw(p)-128),h=kind==='audio'?92:Math.round(w*9/16)+52;
+ const y=nextFreeY(p);
+ if(y+h>MAX_HEIGHT){message('ページの下端に空きがありません。新しいページに置いてください。');return null;}
+ const before=snapshot(p);
+ const block={id:crypto.randomUUID(),type:'media',kind,x:64,y,width:w,height:h,mediaId:id,name:(name||'').slice(0,120),duration};
+ p.blocks=[...p.blocks,block];growPage(p,y+h+80);commit(before,p);activeBlock=block.id;renderPage();refreshMediaUsage();
+ return block;
+}
+async function refreshMediaUsage(){try{const u=await mediaUsage();$('media-usage').textContent=u.count?'録音・動画 '+u.count+' 件（'+(u.bytes/1048576).toFixed(1)+' MB）はこの端末にだけ保存されています。':'録音・動画はこの端末にだけ保存されます。';}catch{}}
+// drop recordings no page (or trash entry) refers to any more
+async function sweepMedia(){
+ try{
+  const used=new Set();
+  for(const pg of doc.pages)for(const b of pg.blocks)if(b.type==='media')used.add(b.mediaId);
+  for(const t of doc.trash||[])for(const pg of t.pages||[])for(const b of pg.blocks||[])if(b.type==='media')used.add(b.mediaId);
+  for(const id of await listMediaIds())if(!used.has(id)){const r=await getMedia(id);if(r&&Date.now()-(r.createdAt||0)>7*864e5)await deleteMedia(id);}
+ }catch{}
+ refreshMediaUsage();
+}
+// -- audio recording (mic only) with a floating bar --
+let recorder=null,recChunks=[],recStart=0,recTimer=0,recStream=null,recKind='audio',recCancelled=false;
+function stopRecordingUi(){clearInterval(recTimer);$('rec-bar').hidden=true;}
+async function startAudioRecording(){
+ if(recorder){message('すでに録音中です。');return;}
+ let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){message('マイクを使えません：'+(e.message||e.name));return;}
+ beginRecording(stream,'audio');
+ $('rec-label').textContent='録音中';$('rec-bar').hidden=false;
+}
+function beginRecording(stream,kind){
+ recStream=stream;recKind=kind;recChunks=[];recCancelled=false;
+ try{recorder=makeRecorder(stream,kind);}catch(e){stopStream(stream);message('この端末では録音できません：'+(e.message||e.name));return;}
+ recorder.ondataavailable=e=>{if(e.data&&e.data.size)recChunks.push(e.data);};
+ recorder.onstop=async()=>{
+  const blob=new Blob(recChunks,{type:recorder.mimeType||(kind==='video'?'video/webm':'audio/webm')}),dur=(performance.now()-recStart)/1000;
+  stopStream(recStream);recorder=null;recStream=null;stopRecordingUi();
+  if(recCancelled||!blob.size){message(kind==='video'?'録画を取り消しました。':'録音を取り消しました。');return;}
+  const block=await addMediaBlock(blob,kind,(kind==='video'?'動画 ':'録音 ')+stamp(),dur);
+  if(block)message((kind==='video'?'動画':'録音')+'をページに置きました（'+fmtTime(dur)+'）。この端末にだけ保存されます。');
+ };
+ recorder.start(1000);recStart=performance.now();
+ const tick=()=>{const t=fmtTime((performance.now()-recStart)/1000);$('rec-time').textContent=t;$('cam-time').textContent=t;};
+ clearInterval(recTimer);recTimer=setInterval(tick,500);tick();
+}
+function stopRecording(cancel=false){if(!recorder)return;recCancelled=cancel;try{recorder.stop();}catch{stopStream(recStream);recorder=null;stopRecordingUi();}}
+$('add-audio').onclick=()=>startAudioRecording();
+$('rec-stop').onclick=()=>stopRecording(false);
+$('rec-cancel').onclick=()=>stopRecording(true);
+// -- camera dialog: photo (no shutter sound) and video --
+const camDialog=$('camera-dialog'),camPreview=$('cam-preview');let camStream=null,camFacing='environment';
+async function openCameraDialog(){
+ if(!ready)return;
+ try{camStream=await openCamera(camFacing,true);}catch(e){message('カメラを使えません：'+(e.message||e.name)+'。ブラウザのカメラの許可を確認してください。');return;}
+ camPreview.srcObject=camStream;$('cam-status').textContent='';camDialog.classList.remove('recording');$('cam-time').hidden=true;$('cam-rec').replaceChildren(icon('video'),'録画開始');
+ if(!camDialog.open)camDialog.showModal();
+}
+function closeCameraDialog(){if(recorder&&recKind==='video')stopRecording(true);stopStream(camStream);camStream=null;camPreview.srcObject=null;if(camDialog.open)camDialog.close();}
+$('add-camera').onclick=()=>openCameraDialog();
+$('cam-close').onclick=()=>closeCameraDialog();
+camDialog.addEventListener('cancel',e=>{e.preventDefault();closeCameraDialog();});
+$('cam-flip').onclick=async()=>{if(recorder)return;camFacing=camFacing==='environment'?'user':'environment';stopStream(camStream);try{camStream=await openCamera(camFacing,true);camPreview.srcObject=camStream;}catch(e){$('cam-status').textContent='切り替えできません';}};
+$('cam-shot').onclick=async()=>{
+ if(!camStream)return;
+ const file=await takePhoto(camPreview);$('cam-status').textContent='貼り付けました';setTimeout(()=>{if($('cam-status').textContent==='貼り付けました')$('cam-status').textContent='';},1500);
+ await insertImages([file]);
+};
+$('cam-rec').onclick=()=>{
+ if(!camStream)return;
+ if(recorder&&recKind==='video'){stopRecording(false);camDialog.classList.remove('recording');$('cam-time').hidden=true;$('cam-rec').replaceChildren(icon('video'),'録画開始');return;}
+ if(recorder){message('録音中は録画できません。');return;}
+ beginRecording(camStream,'video');if(!recorder)return;
+ camDialog.classList.add('recording');$('cam-time').hidden=false;$('cam-rec').replaceChildren(icon('stop'),'録画を止めて貼る');$('rec-bar').hidden=true;
+};
+// -- import audio/video files --
+$('add-media').onclick=()=>$('media-file').click();
+$('media-file').onchange=async e=>{
+ for(const f of [...e.target.files]){
+  if(!/^(audio|video)\//.test(f.type)){message('音声・動画ファイルではありません：'+f.name);continue;}
+  if(f.size>1.5e9){message('ファイルが大きすぎます（1.5GB まで）：'+f.name);continue;}
+  const kind=f.type.startsWith('video')?'video':'audio';
+  const block=await addMediaBlock(f,kind,f.name.replace(/\.[^.]+$/,''),undefined);
+  if(block)message('「'+f.name+'」をページに置きました。');
+ }
+ e.target.value='';
+};
+// -- transcription settings + run --
+const KEY_STORE='yohaku-transcribe-key',MODEL_STORE='yohaku-transcribe-model';
+const transcribeKey=()=>{try{return localStorage.getItem(KEY_STORE)||'';}catch{return '';}};
+const transcribeModel=()=>{try{return localStorage.getItem(MODEL_STORE)||TRANSCRIBE_MODELS[0][0];}catch{return TRANSCRIBE_MODELS[0][0];}};
+{const sel=$('transcribe-model');for(const [v,l] of TRANSCRIBE_MODELS){const o=document.createElement('option');o.value=v;o.textContent=l+'（'+v+'）';sel.append(o);}}
+function openTranscribeSettings(){$('transcribe-key').value=transcribeKey();$('transcribe-model').value=transcribeModel();if(!$('transcribe-dialog').open)$('transcribe-dialog').showModal();$('transcribe-key').focus();}
+$('transcribe-settings').onclick=openTranscribeSettings;
+$('transcribe-close').onclick=()=>$('transcribe-dialog').close();
+$('transcribe-dialog').querySelector('form').addEventListener('submit',()=>{try{localStorage.setItem(KEY_STORE,$('transcribe-key').value.trim());localStorage.setItem(MODEL_STORE,$('transcribe-model').value);}catch{}message($('transcribe-key').value.trim()?'文字起こしの設定を保存しました。':'API キーを空にしました。');});
+async function transcribeBlock(blockId,statusEl){
+ const b=blockOf(blockId);if(!b)return;
+ const key=transcribeKey();if(!key){message('文字起こしには API キーが必要です。設定してください。');openTranscribeSettings();return;}
+ const rec=await getMedia(b.mediaId);if(!rec){statusEl.textContent='この端末に音声がありません';return;}
+ statusEl.classList.remove('error');statusEl.textContent='文字起こし中…（音声を準備しています）';
+ try{
+  const text=await transcribeBlob(rec.blob,{apiKey:key,model:transcribeModel(),onProgress:(i,n)=>{statusEl.textContent='文字起こし中… '+i+'/'+n;}});
+  if(!text){statusEl.textContent='文章が得られませんでした（無音か、認識できない音声）';return;}
+  const p=page(),cur=blockOf(blockId,p);if(!cur){statusEl.textContent='ブロックが見つかりません（別のページに移りました）';return;}
+  const before=snapshot(p);
+  const tb=newTextBlock(cur.x,Math.min(MAX_HEIGHT-200,cur.y+cur.height+12),text);tb.width=Math.max(400,Math.min(cur.width+200,pw(p)-cur.x-24));
+  p.blocks=[...p.blocks,tb];growPage(p,tb.y+Math.min(2000,80+text.length/2));commit(before,p);activeBlock=tb.id;renderPage();
+  statusEl.textContent='文字起こしを下に貼り付けました（'+text.length+' 字）';message('文字起こしを貼り付けました。');
+ }catch(e){statusEl.classList.add('error');statusEl.textContent='文字起こしに失敗：'+(e.message||e);}
 }
 // ---- multi-select ----
 const selMark=()=>{const m=el('i','sel-mark');m.append(icon('check'));return m;};
@@ -797,8 +930,8 @@ function renderBlocks() {
   if(!el){
    el=document.createElement('div');el.dataset.id=b.id;el.dataset.pageId=p.id;el.className='block '+b.type;
    const bar=document.createElement('div');bar.className='block-bar';
-   const grip=document.createElement('button');grip.type='button';grip.className='grip';grip.append(icon('move'),'移動');grip.setAttribute('aria-label',(b.type==='image'?'画像':'入力欄')+'を移動');
-   const remove=document.createElement('button');remove.type='button';remove.className='remove';remove.append(icon('x'));remove.setAttribute('aria-label',(b.type==='image'?'画像':'入力欄')+'を削除');remove.title='削除';
+   const grip=document.createElement('button');grip.type='button';grip.className='grip';grip.append(icon('move'),'移動');grip.setAttribute('aria-label',(b.type==='image'?'画像':b.type==='media'?'録音・動画':'入力欄')+'を移動');
+   const remove=document.createElement('button');remove.type='button';remove.className='remove';remove.append(icon('x'));remove.setAttribute('aria-label',(b.type==='image'?'画像':b.type==='media'?'録音・動画':'入力欄')+'を削除');remove.title='削除';
    remove.onclick=()=>removeBlock(b.id);
    bar.append(grip,remove);el.append(bar);
    if(b.type==='text'){
@@ -823,6 +956,8 @@ function renderBlocks() {
      if(cur&&cur.text===''){owner.blocks=owner.blocks.filter(x=>x.id!==b.id);if(activeBlock===b.id)activeBlock=null;changed(owner);if(owner===page())renderPage();}
     });
     el.append(ed);
+   } else if(b.type==='media'){
+    el.append(mediaView(b,el));
    } else {
     const img=document.createElement('img');img.src=b.src;img.alt=b.name||'貼り付けた画像';img.draggable=false;el.append(img);
    }
@@ -830,7 +965,7 @@ function renderBlocks() {
    blocksLayer.append(el);
   }
   el.style.left=b.x+'px';el.style.top=b.y+'px';el.style.width=b.width+'px';
-  if(b.type==='image')el.style.height=b.height+'px';
+  if(b.type==='image'||b.type==='media')el.style.height=b.height+'px';
   else {
    const ed=el.querySelector('.editor');syncEditor(ed,b);
    const sizeKey=b.width+':'+lastRuns.get(ed).length;
@@ -1052,7 +1187,7 @@ const penBusy=()=>activeGesture()||performance.now()-lastPenAt<1500;
 let pinchActive=false;
 sheet.addEventListener('touchstart',e=>{
  if(!ready||document.body.classList.contains('reading')||e.touches.length>=2)return;
- if(e.target instanceof Element&&e.target.closest('button,.block-bar,.resize,select,input'))return; // controls keep their tap
+ if(e.target instanceof Element&&e.target.closest('button,.block-bar,.resize,select,input,audio,video,.media-view'))return; // controls keep their tap
  const inkTool=inkToolNow();
  if((stylusTouch(e)&&inkTool)||activeGesture()||(inkTool&&(penBusy()||palmTouch(e))))e.preventDefault();
 },{passive:false});
@@ -1456,7 +1591,7 @@ function setupServiceWorker() {
 }
 async function start() {
  try{
-  db=await openStore();const loaded=await loadNotebook(db),saved=loaded.doc;
+  db=await openStore();const loaded=await loadNotebook(db),saved=loaded.doc;setTimeout(()=>{if(doc)sweepMedia();},4000);
   if(loaded.legacy&&saved&&saved.version!==1){dirtyAll=true;dropLegacy=true;dirty=true;revision++;} // move the old single document to the split layout
   if(saved&&saved.version===1){
    const next=upgradeNotebook(saved);await migrateNotebook(db,saved,next);doc=next;

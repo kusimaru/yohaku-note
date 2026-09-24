@@ -774,3 +774,42 @@ body .toolbar{overflow:hidden;max-width:100%}
 body .text-tools,body .pen-settings,body #eraser-options,body #select-options{min-height:42px;padding:2px 4px;gap:6px}
 body .text-tools .tool-group button,body .toolbar-context button{min-height:36px;padding:4px 8px}
 body .toolbar{padding:3px 8px;gap:2px 10px}
+
+/* ---------- camera, recording, media blocks, transcription ---------- */
+.block.media{background:#f7f9f5;border:1px solid #dde5df;border-radius:8px;padding:6px 6px 4px;box-sizing:border-box}
+.block.media.active{border-color:#4e8068}
+.media-view{display:flex;flex-direction:column;gap:4px}
+.media-view audio{width:100%;height:36px}
+.media-view video{width:100%;max-height:100%;background:#000;border-radius:6px}
+.media-caption{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;color:#5f7166;min-height:24px}
+.media-name{font-weight:600;color:#2b3f38;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%}
+.media-caption button{min-height:28px;padding:2px 8px;font-size:12px;gap:4px;border-radius:6px}
+.media-caption button .icon{width:14px;height:14px}
+.media-status{flex:1 0 100%;font-size:11px;color:#7e8e7d}
+.media-status.error{color:#a2363b}
+.block.media[data-missing="1"]{background:#f4f4f4;color:#8a948b}
+.rec-bar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;display:flex;align-items:center;gap:10px;background:#fff;border:2px solid #d94a3d;border-radius:999px;padding:8px 10px 8px 16px;box-shadow:0 8px 30px #00000022;font-weight:700;color:#2b3f38}
+.rec-bar[hidden]{display:none}
+.rec-dot{width:12px;height:12px;border-radius:50%;background:#d94a3d;animation:rec-blink 1s infinite}
+@keyframes rec-blink{50%{opacity:.2}}
+body .rec-bar button{min-height:40px}
+.camera-dialog,.transcribe-dialog{border:1px solid #dce3d9;border-radius:14px;padding:12px;max-width:min(96vw,900px);width:min(96vw,900px);box-shadow:0 20px 60px #00000033}
+.camera-dialog::backdrop,.transcribe-dialog::backdrop{background:#0006}
+.camera-body{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9;max-height:70vh}
+.camera-body video{width:100%;height:100%;object-fit:contain;display:block}
+.cam-status{position:absolute;left:10px;top:10px;color:#fff;font-size:13px;background:#0008;padding:3px 8px;border-radius:6px}
+.cam-status:empty{display:none}
+.camera-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.cam-time{font-weight:700;color:#d94a3d;font-variant-numeric:tabular-nums}
+.camera-dialog.recording #cam-rec{background:#fbe9e7;border-color:#d94a3d;color:#a2363b}
+.transcribe-dialog{width:min(96vw,520px)}
+.transcribe-dialog h3{margin:0 0 8px;display:flex;align-items:center;gap:6px;font-size:16px}
+.transcribe-dialog label{display:block;margin:10px 0 4px;font-size:13px;color:#5f7166}
+.transcribe-dialog input,.transcribe-dialog select{width:100%;box-sizing:border-box;font-size:15px;min-height:42px;padding:6px 10px;border:1px solid #dce3dd;border-radius:8px;margin-top:4px}
+.dialog-actions{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+@media(max-width:700px){.camera-dialog{padding:8px}.camera-body{aspect-ratio:auto;height:52vh}}
+
+/* media buttons: icon only when the ribbon is short of room; the row may wrap on tablets */
+.media-group{gap:2px}
+@media(max-width:1600px){.media-group .lbl{display:none}.media-group button{padding:6px 7px;gap:0}}
+@media(max-width:1180px){body .toolbar-primary{flex-wrap:wrap}}

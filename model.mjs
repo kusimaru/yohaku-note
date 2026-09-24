@@ -414,11 +414,12 @@ export function validateBackup(doc) {
   else {
    if(!Array.isArray(p.blocks)||p.blocks.length>1000)bad();const blockIds=new Set();
    for(const o of p.blocks){
-    if(!o||typeof o.id!=='string'||o.id.length>100||blockIds.has(o.id)||!['text','image'].includes(o.type)||
+    if(!o||typeof o.id!=='string'||o.id.length>100||blockIds.has(o.id)||!['text','image','media'].includes(o.type)||
      ![o.x,o.y,o.width,o.height].every(Number.isFinite)||o.x<0||o.y<0||o.width<40||o.height<24||
      o.x+o.width>width+.01||o.y+o.height>height+.01)bad();
     blockIds.add(o.id);
     if(o.type==='text'){if(typeof o.text!=='string'||o.text.length>200000)bad();if(o.runs!==undefined)validateRuns(o.runs,bad);}
+    else if(o.type==='media'){if(!['audio','video'].includes(o.kind)||typeof o.mediaId!=='string'||!o.mediaId||o.mediaId.length>100||(o.name!==undefined&&(typeof o.name!=='string'||o.name.length>120))||(o.duration!==undefined&&!Number.isFinite(o.duration)))bad();}
     else {if(typeof o.src!=='string'||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(o.src)||o.src.length>16000000)bad();totalImages+=o.src.length;if(totalImages>65000000)bad();}
    }
   }

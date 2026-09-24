@@ -823,3 +823,5 @@ body .media-view audio{height:44px}
 .rec-bar,.rec-bar button{white-space:nowrap}
 .rec-bar button{flex:none}
 .rec-bar #rec-label,.rec-bar #rec-time{flex:none}
+.rec-bar .secondary{width:auto;margin:0;font-size:var(--ui-fs-sm)}
+.rec-dot{flex:none}

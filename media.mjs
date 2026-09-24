@@ -32,8 +32,11 @@ export function takePhoto(video,maxEdge=1600,quality=.86){
  c.getContext('2d').drawImage(video,0,0,c.width,c.height);
  return new Promise(resolve=>c.toBlob(b=>resolve(new File([b],'camera-'+stamp()+'.jpg',{type:'image/jpeg'})),'image/jpeg',quality));
 }
+// Safari (iPad/iPhone/Mac) records MP4/AAC and cannot play WebM; everything else records WebM/Opus.
+export const APPLE=typeof navigator!=='undefined'&&(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)||(/Macintosh/.test(navigator.userAgent)&&/Safari/.test(navigator.userAgent)&&!/Chrome|Chromium|Edg/.test(navigator.userAgent)));
+export const defaultMime=kind=>APPLE?(kind==='video'?'video/mp4':'audio/mp4'):(kind==='video'?'video/webm':'audio/webm');
 export function pickMimeType(kind){
- const list=kind==='video'?['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']:['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
+ const list=APPLE?(kind==='video'?['video/mp4','video/webm']:['audio/mp4','audio/webm']):(kind==='video'?['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']:['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus']);
  return list.find(t=>typeof MediaRecorder!=='undefined'&&MediaRecorder.isTypeSupported(t))||'';
 }
 export function makeRecorder(stream,kind){
@@ -64,11 +67,20 @@ export async function decodeToMono16k(blob,rate=16000){
  const buf=await blob.arrayBuffer();
  const AC=window.AudioContext||window.webkitAudioContext,OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
  const ctx=new AC();let audio;
- try{audio=await ctx.decodeAudioData(buf);}finally{try{await ctx.close();}catch{}}
+ try{audio=await new Promise((res,rej)=>{const r=ctx.decodeAudioData(buf,res,rej);if(r&&r.then)r.then(res,rej);});}finally{try{await ctx.close();}catch{}} // callback form for older Safari
  const len=Math.max(1,Math.ceil(audio.duration*rate)),off=new OAC(1,len,rate);
  const src=off.createBufferSource();src.buffer=audio;src.connect(off.destination);src.start();
  const out=await off.startRendering();
  return {samples:out.getChannelData(0),rate,duration:audio.duration};
+}
+// Playback fallback for audio the media element refuses: decode with WebAudio and re-wrap as WAV.
+export async function blobToWav(blob){
+ const buf=await blob.arrayBuffer();
+ const AC=window.AudioContext||window.webkitAudioContext;const ctx=new AC();let audio;
+ try{audio=await new Promise((res,rej)=>{const r=ctx.decodeAudioData(buf,res,rej);if(r&&r.then)r.then(res,rej);});}finally{try{await ctx.close();}catch{}}
+ const n=audio.length,ch=audio.numberOfChannels,mono=new Float32Array(n);
+ for(let c=0;c<ch;c++){const d=audio.getChannelData(c);for(let i=0;i<n;i++)mono[i]+=d[i]/ch;}
+ return encodeWav(mono,audio.sampleRate);
 }
 export const TRANSCRIBE_MODELS=[['gpt-4o-mini-transcribe','標準（安い・速い）'],['gpt-4o-transcribe','高精度'],['whisper-1','Whisper（従来）']];
 export async function transcribeBlob(blob,{apiKey,model='gpt-4o-mini-transcribe',language='ja',onProgress=()=>{},fetchImpl=(...a)=>fetch(...a),chunkSeconds=600}={}){

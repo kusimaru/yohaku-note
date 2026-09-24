@@ -2,7 +2,7 @@ import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTe
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
-import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS } from './media.mjs';
+import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS, APPLE, defaultMime, blobToWav } from './media.mjs';
 import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
 import { normalizeRuns, runsToText, blockRuns, DEFAULT_TEXT_COLOR, MIN_FONT, MAX_FONT, MAX_LAYERS, ensureLayers, activeLayerOf, addLayer, removeLayer, updateLayer, moveLayer } from './model.mjs';
 const off=document.createElement('canvas'),octx=off.getContext('2d');
@@ -282,8 +282,16 @@ function mediaView(b,host){
  cap.append(name,tr,dl,status);box.append(player,cap);
  getMedia(b.mediaId).then(rec=>{
   if(!rec){host.dataset.missing='1';player.hidden=true;tr.disabled=true;dl.disabled=true;status.textContent='この端末には'+(b.kind==='video'?'動画':'音声')+'がありません（記録した端末で再生できます）';return;}
-  player.src=mediaUrl(b.mediaId,rec.blob);if(rec.duration&&!b.duration)status.textContent='';
-  status.textContent=(rec.duration?fmtTime(rec.duration)+'・':'')+Math.round(rec.blob.size/1024/102.4)/10+' MB・この端末に保存';
+  const info=(rec.duration?fmtTime(rec.duration)+'・':'')+Math.round(rec.blob.size/1024/102.4)/10+' MB・'+(rec.blob.type||'形式不明')+'・この端末に保存';
+  status.textContent=info;
+  let retried=false;
+  player.addEventListener('error',async()=>{
+   const code=player.error?.code;
+   if(b.kind==='audio'&&!retried){retried=true;status.textContent='再生用に変換しています…';
+    try{const wav=await blobToWav(rec.blob);player.src=URL.createObjectURL(wav);player.load();status.textContent=info+'（WAV に変換して再生）';return;}catch(e){status.classList.add('error');status.textContent='再生できません（変換失敗：'+(e.message||e)+'）';return;}}
+   status.classList.add('error');status.textContent='再生できません（エラー '+code+'・'+(rec.blob.type||'形式不明')+'・'+rec.blob.size+' バイト）';
+  });
+  player.src=mediaUrl(b.mediaId,rec.blob);player.load();
  }).catch(()=>{status.textContent='読み込めませんでした';status.classList.add('error');});
  tr.onclick=()=>transcribeBlock(b.id,status);
  dl.onclick=async()=>{const rec=await getMedia(b.mediaId);if(!rec)return;const a=document.createElement('a');a.href=mediaUrl(b.mediaId,rec.blob);a.download=(b.name||'media').replace(/[\\/:*?"<>|]/g,'_')+'.'+extOf(rec.blob.type);a.click();};
@@ -326,13 +334,14 @@ function beginRecording(stream,kind){
  try{recorder=makeRecorder(stream,kind);}catch(e){stopStream(stream);message('この端末では録音できません：'+(e.message||e.name));return;}
  recorder.ondataavailable=e=>{if(e.data&&e.data.size)recChunks.push(e.data);};
  recorder.onstop=async()=>{
-  const blob=new Blob(recChunks,{type:recorder.mimeType||(kind==='video'?'video/webm':'audio/webm')}),dur=(performance.now()-recStart)/1000;
+  const type=(recorder.mimeType||'').split(';')[0]||defaultMime(kind);
+  const blob=new Blob(recChunks,{type}),dur=(performance.now()-recStart)/1000;
   stopStream(recStream);recorder=null;recStream=null;stopRecordingUi();
   if(recCancelled||!blob.size){message(kind==='video'?'録画を取り消しました。':'録音を取り消しました。');return;}
   const block=await addMediaBlock(blob,kind,(kind==='video'?'動画 ':'録音 ')+stamp(),dur);
   if(block)message((kind==='video'?'動画':'録音')+'をページに置きました（'+fmtTime(dur)+'）。この端末にだけ保存されます。');
  };
- recorder.start(1000);recStart=performance.now();
+ if(APPLE)recorder.start();else recorder.start(1000);recStart=performance.now();
  const tick=()=>{const t=fmtTime((performance.now()-recStart)/1000);$('rec-time').textContent=t;$('cam-time').textContent=t;};
  clearInterval(recTimer);recTimer=setInterval(tick,500);tick();
 }

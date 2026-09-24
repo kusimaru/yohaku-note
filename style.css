@@ -825,3 +825,6 @@ body .media-view audio{height:44px}
 .rec-bar #rec-label,.rec-bar #rec-time{flex:none}
 .rec-bar .secondary{width:auto;margin:0;font-size:var(--ui-fs-sm)}
 .rec-dot{flex:none}
+/* recording bar: above the sidebar (z 80) and centred over the note area */
+.rec-bar{z-index:90}
+@media(min-width:1181px){.rec-bar{left:calc(var(--rail) + (100vw - var(--rail))/2)}body.nav-collapsed .rec-bar{left:50%}}

@@ -835,3 +835,8 @@ body .media-view audio{height:44px}
 .media-folder{margin-top:6px;display:flex;flex-direction:column;gap:4px}
 .media-folder button{width:100%;justify-content:flex-start;text-align:left;font-size:var(--ui-fs-sm);min-height:40px}
 #media-folder-status{margin:2px 0}
+
+/* notices: close button, auto-hide */
+body .message{display:flex;align-items:center;gap:10px;padding-right:10px}
+body .message-close{margin-left:auto;flex:none;width:38px;height:38px;min-height:38px;padding:0;background:#fff8ea;border-color:#e8c68f;color:#725b26}
+body .message-close .icon{width:18px;height:18px}

@@ -32,9 +32,12 @@ const historyFor=id=>{if(!histories.has(id))histories.set(id,{undo:[],redo:[]});
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 const snapshot=p=>{ensureLayers(p);return {strokes:p.strokes.slice(),blocks:p.blocks.slice(),height:p.height,layers:p.layers.slice(),activeLayer:p.activeLayer};};
 function restore(p,s){p.strokes=s.strokes;p.blocks=s.blocks;p.height=s.height;if(s.layers){p.layers=s.layers;p.activeLayer=s.activeLayer;}}
+let messageTimer=0;
 function message(text,retry=false) {
- $('message').replaceChildren(document.createTextNode(text));$('message').hidden=false;
- if(retry){const button=document.createElement('button');button.textContent='保存を再試行';button.onclick=()=>{saveFailed=false;save();};$('message').append(' ',button);}
+ const box=$('message');box.replaceChildren(document.createTextNode(text));box.hidden=false;
+ if(retry){const button=document.createElement('button');button.textContent='保存を再試行';button.onclick=()=>{saveFailed=false;save();};box.append(' ',button);}
+ const close=document.createElement('button');close.type='button';close.className='message-close icon-only';close.title='閉じる';close.setAttribute('aria-label','お知らせを閉じる');close.append(icon('x'));close.onclick=()=>{box.hidden=true;clearTimeout(messageTimer);};box.append(close);
+ clearTimeout(messageTimer);if(!retry)messageTimer=setTimeout(()=>{box.hidden=true;},15000); // notices fade after 15 s; the retry notice stays
 }
 function setStatus(text,error=false){$('save-status').replaceChildren(...(text==='保存済み'?[icon('check'),' ']:[]),text);$('save-status').classList.toggle('error',error);}
 let saveTimer=0;

@@ -337,6 +337,7 @@ function beginRecording(stream,kind){
  clearInterval(recTimer);recTimer=setInterval(tick,500);tick();
 }
 function stopRecording(cancel=false){if(!recorder)return;recCancelled=cancel;try{recorder.stop();}catch{stopStream(recStream);recorder=null;stopRecordingUi();}}
+document.body.append($('rec-bar')); // out of the app's stacking contexts so the sidebar never covers it
 $('add-audio').onclick=()=>startAudioRecording();
 $('rec-stop').onclick=()=>stopRecording(false);
 $('rec-cancel').onclick=()=>stopRecording(true);

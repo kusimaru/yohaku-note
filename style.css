@@ -819,3 +819,7 @@ body .media-caption button{min-height:36px;padding:4px 10px;font-size:var(--ui-f
 body .media-caption button .icon{width:18px;height:18px}
 body .media-status{font-size:var(--ui-fs-sm)}
 body .media-view audio{height:44px}
+/* recording bar: labels and buttons on one line */
+.rec-bar,.rec-bar button{white-space:nowrap}
+.rec-bar button{flex:none}
+.rec-bar #rec-label,.rec-bar #rec-time{flex:none}

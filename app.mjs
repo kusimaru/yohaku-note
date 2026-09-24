@@ -277,9 +277,10 @@ function mediaView(b,host){
  const box=el('div','media-view');
  const player=document.createElement(b.kind==='video'?'video':'audio');player.controls=true;player.playsInline=true;player.preload='metadata';player.setAttribute('aria-label',b.name||'');
  const cap=el('div','media-caption'),name=el('span','media-name',b.name||''),status=el('span','media-status','');
- const tr=el('button','',''),dl=el('button','','');tr.type='button';dl.type='button';tr.append(icon('text-lines'),'文字起こし');dl.append(icon('download'),'書き出し');
- tr.title='この'+(b.kind==='video'?'動画':'音声')+'を文章にして、下に貼り付けます';dl.title='ファイルとして保存';
- cap.append(name,tr,dl,status);box.append(player,cap);
+ const tr=el('button','',''),dl=el('button','',''),rm=el('button','media-remove','');tr.type='button';dl.type='button';rm.type='button';tr.append(icon('text-lines'),'文字起こし');dl.append(icon('download'),'書き出し');rm.append(icon('trash'),'削除');
+ tr.title='この'+(b.kind==='video'?'動画':'音声')+'を文章にして、下に貼り付けます';dl.title='ファイルとして保存';rm.title='ページから外す（「戻す」で元に戻せます）';
+ rm.onclick=()=>{removeBlock(b.id);message((b.kind==='video'?'動画':'録音')+'をページから外しました。上の「戻す」で元に戻せます。');};
+ cap.append(name,tr,dl,rm,status);box.append(player,cap);
  getMedia(b.mediaId).then(rec=>{
   if(!rec){host.dataset.missing='1';player.hidden=true;tr.disabled=true;dl.disabled=true;status.textContent='この端末には'+(b.kind==='video'?'動画':'音声')+'がありません（記録した端末で再生できます）';return;}
   const info=(rec.duration?fmtTime(rec.duration)+'・':'')+Math.round(rec.blob.size/1024/102.4)/10+' MB・'+(rec.blob.type||'形式不明')+'・この端末に保存';

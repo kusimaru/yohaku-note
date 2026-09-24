@@ -828,3 +828,6 @@ body .media-view audio{height:44px}
 /* recording bar: above the sidebar (z 80) and centred over the note area */
 .rec-bar{z-index:90}
 @media(min-width:1181px){.rec-bar{left:calc(var(--rail) + (100vw - var(--rail))/2)}body.nav-collapsed .rec-bar{left:50%}}
+
+.media-remove{color:#a2363b}
+.media-remove:hover:not(:disabled){background:#fbe9e7}

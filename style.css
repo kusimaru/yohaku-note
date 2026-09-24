@@ -840,3 +840,9 @@ body .media-view audio{height:44px}
 body .message{display:flex;align-items:center;gap:10px;padding-right:10px}
 body .message-close{margin-left:auto;flex:none;width:38px;height:38px;min-height:38px;padding:0;background:#fff8ea;border-color:#e8c68f;color:#725b26}
 body .message-close .icon{width:18px;height:18px}
+
+#kbd-toggle[aria-pressed=true]{background:#e0edda;border-color:#95b489;color:#315d35}
+@media(max-width:700px){#kbd-toggle{padding:8px}}
+/* notices float over the page (top right) so showing/hiding them never moves the paper */
+body .message{position:fixed;top:56px;right:16px;left:auto;margin:0;max-width:min(560px,calc(100vw - 32px));z-index:95;box-shadow:0 10px 30px #00000026}
+@media(max-width:700px){body .message{top:52px;left:8px;right:8px;max-width:none}}

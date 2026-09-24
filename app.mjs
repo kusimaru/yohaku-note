@@ -1039,6 +1039,43 @@ function removeBlock(id) {
  const before=snapshot(p);p.blocks=p.blocks.filter(b=>b.id!==id);if(activeBlock===id)activeBlock=null;
  commit(before);renderPage();
 }
+// ---- on-screen keyboard button: focus a text box (keyboard appears) / blur it (keyboard goes away) ----
+// Browsers only show the soft keyboard for a focused editable element inside a user gesture, so the
+// button focuses/blurs an editor; on Chromium the VirtualKeyboard API is used as well.
+let kbdRestore=null; // {id, range} caret to put back when the keyboard is shown again
+const editorFocused=()=>{const a=document.activeElement;return a&&a.classList?.contains('editor')?a:null;};
+function keyboardHide(){
+ const ed=editorFocused();if(!ed)return;
+ const id=ed.closest('.block')?.dataset.id;let range=null;try{const sel=getSelection();if(sel.rangeCount&&ed.contains(sel.getRangeAt(0).startContainer))range=sel.getRangeAt(0).cloneRange();}catch{}
+ kbdRestore={id,range};ed.blur();
+ try{navigator.virtualKeyboard?.hide();}catch{}
+}
+function keyboardShow(){
+ const p=page();let ed=null;
+ const pick=id=>id?blocksLayer.querySelector('[data-id="'+id+'"] .editor'):null;
+ ed=pick(kbdRestore?.id)||pick(activeBlock)||[...blocksLayer.querySelectorAll('.block.text .editor')].at(-1);
+ if(!ed){createTextBlock(64,nextFreeY(p));ed=editorFocused()||[...blocksLayer.querySelectorAll('.block.text .editor')].at(-1);if(!ed)return;}
+ try{if(navigator.virtualKeyboard)navigator.virtualKeyboard.overlaysContent=true;}catch{}
+ ed.focus({preventScroll:false});
+ try{const sel=getSelection();if(kbdRestore?.range&&ed.contains(kbdRestore.range.startContainer)){sel.removeAllRanges();sel.addRange(kbdRestore.range);}else{const r=document.createRange();r.selectNodeContents(ed);r.collapse(false);sel.removeAllRanges();sel.addRange(r);}}catch{}
+ try{navigator.virtualKeyboard?.show();}catch{}
+ ed.scrollIntoView({block:'center',behavior:'smooth'});
+}
+// the button must not steal the caret (mousedown would), and if the caret was lost a moment ago
+// (touch browsers), treat the press as "hide" using the editor that just lost focus
+let lastBlur=null;
+$('kbd-toggle').addEventListener('mousedown',e=>e.preventDefault());
+$('kbd-toggle').onclick=()=>{
+ if(editorFocused()){keyboardHide();return;}
+ if(lastBlur&&performance.now()-lastBlur.at<500){kbdRestore={id:lastBlur.ed.closest('.block')?.dataset.id,range:lastBlur.range};lastBlur=null;try{navigator.virtualKeyboard?.hide();}catch{}syncKbdButton();return;}
+ keyboardShow();
+};
+const syncKbdButton=()=>{const on=!!editorFocused();$('kbd-toggle').setAttribute('aria-pressed',String(on));$('kbd-toggle').title=on?'画面のキーボードをしまう':'画面のキーボードを出す（物理キーボードがあるときは不要）';};
+document.addEventListener('focusin',syncKbdButton);
+document.addEventListener('focusout',e=>{
+ if(e.target?.classList?.contains('editor')){let range=null;try{const sel=getSelection();if(sel.rangeCount&&e.target.contains(sel.getRangeAt(0).startContainer))range=sel.getRangeAt(0).cloneRange();}catch{}lastBlur={ed:e.target,at:performance.now(),range};}
+ setTimeout(syncKbdButton,0);
+});
 function createTextBlock(x,y) {
  const p=page(),before=snapshot(p);
  const bx=clamp(Math.round(x)-12,0,pw(page())-240),by=clamp(Math.round(y)-14,0,MAX_HEIGHT-60);

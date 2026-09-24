@@ -293,7 +293,7 @@ async function addMediaBlock(blob,kind,name,duration){
  if(!ready)return null;
  const id=crypto.randomUUID();
  await putMedia(id,{blob,kind,name,type:blob.type,duration,createdAt:Date.now()});
- const p=page(),w=Math.min(520,pw(p)-128),h=kind==='audio'?92:Math.round(w*9/16)+52;
+ const p=page(),w=Math.min(560,pw(p)-128),h=kind==='audio'?128:Math.round(w*9/16)+92;
  const y=nextFreeY(p);
  if(y+h>MAX_HEIGHT){message('ページの下端に空きがありません。新しいページに置いてください。');return null;}
  const before=snapshot(p);

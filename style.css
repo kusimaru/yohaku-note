@@ -813,3 +813,9 @@ body .rec-bar button{min-height:40px}
 .media-group{gap:2px}
 @media(max-width:1600px){.media-group .lbl{display:none}.media-group button{padding:6px 7px;gap:0}}
 @media(max-width:1180px){body .toolbar-primary{flex-wrap:wrap}}
+/* media block captions readable on tablets */
+body .media-caption{font-size:var(--ui-fs-sm);gap:6px 10px}
+body .media-caption button{min-height:36px;padding:4px 10px;font-size:var(--ui-fs-sm)}
+body .media-caption button .icon{width:18px;height:18px}
+body .media-status{font-size:var(--ui-fs-sm)}
+body .media-view audio{height:44px}

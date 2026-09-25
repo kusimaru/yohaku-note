@@ -884,3 +884,4 @@ body .block-bar .icon{width:calc(var(--ui-icon) * var(--ui-inverse-scale,1));hei
 body .block-bar .remove{color:#a2363b;border-color:#d8a19b}
 body .block-bar .copy.done{background:#2f5a4a;border-color:#2f5a4a;color:#fff}
 body .block-bar .copy.done .icon{color:#fff}
+body .block.bar-below .block-bar{top:auto;bottom:calc((var(--ui-btn) + 8px) * -1 * var(--ui-inverse-scale,1))}

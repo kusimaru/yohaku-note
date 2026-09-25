@@ -679,7 +679,7 @@ function layout() {
  sheet.style.setProperty('--ui-inverse-scale',1/scale);sheet.style.width=width+'px';sheet.style.height=p.height+'px';sheet.style.transform='scale('+scale+')';lassoEl.setAttribute('width',width);lassoEl.setAttribute('height',p.height);
  paper.style.height=Math.round(p.height*scale)+'px';
  $('page-size').textContent='ページの大きさ 幅 '+width+' × 高さ '+p.height+'（最大 '+MAX_WIDTH+' × '+MAX_HEIGHT+'）';$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;$('grow-page-x').disabled=!ready||width>=MAX_WIDTH;
- updateViewportCanvas(true);
+ updateViewportCanvas(true);placeBars();
 }
 // The ink canvas covers only the part of the page that is on screen (plus a margin), not the
 // whole page. A page-sized canvas at high DPI (e.g. 2400 x 12000 px on a Surface at 200 %) is
@@ -999,6 +999,12 @@ async function copyBlockText(id,el){
  message(done?'文章をコピーしました（'+text.length+' 字）。ほかの場所に貼り付けられます。':'コピーできませんでした。文章を長押しして選び、コピーしてください。');
  const btn=el.querySelector('.block-bar .copy');if(btn&&done){btn.classList.add('done');setTimeout(()=>btn.classList.remove('done'),1200);}
 }
+// The button bar sits above a box; for a box near the top edge of the page it would be cut off by the
+// paper frame, so it goes below the box instead.
+function placeBars(){
+ if(!doc)return;const btn=parseFloat(getComputedStyle(document.body).getPropertyValue('--ui-btn'))||48;
+ for(const el of blocksLayer.children){const b=blockOf(el.dataset.id);if(b)el.classList.toggle('bar-below',b.y*scale<btn+14);}
+}
 function renderBlocks() {
  const p=page(),seen=new Set();
  for(const b of p.blocks){
@@ -1058,7 +1064,7 @@ function renderBlocks() {
   el.classList.toggle('active',b.id===activeBlock);
  }
  for(const el of [...blocksLayer.children])if(!seen.has(el.dataset.id))el.remove();
- updateHint();
+ placeBars();updateHint();
 }
 function renderPage(){layout();renderBlocks();}
 function removeBlock(id) {

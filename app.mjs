@@ -1173,7 +1173,7 @@ sheet.addEventListener('pointerdown',e=>{
   const hit=selectMode==='lasso'?null:strokeAt(point[0],point[1]);
   if(hit){if(!additive)selection={strokes:new Set(),blocks:new Set()};selection.strokes.add(hit);selectionLasso=null;renderSelection();startDrag(e,point);return;}
   if(!additive)clearSelection();else selectionLasso=null;
-  if(!selectMode)return; // no enclosing mode chosen: a tap on empty paper only clears the selection
+  // no enclosing mode chosen: dragging on empty paper encloses with a rectangle (same as 四角で囲む)
   if(selectMode==='lasso'){
    lassoEl.classList.remove('settled');
    gesture={type:'lasso',id:e.pointerId,pageId:doc.activeId,points:[point],additive,changed:false};
@@ -1483,7 +1483,7 @@ const hints={text:'クリックした場所に文字を入力できます。ペ�
  part:'なぞった部分だけ消します。「大きさ」で消しゴムの太さを変えられます',whole:'触れた線を一本ごと消します。「大きさ」で消しゴムの太さを変えられます',
  rect:'四角で囲んで選択（触れた線はまるごと）。文字や画像はクリックで選択。ドラッグや矢印キーで移動できます',
  lasso:'ペンやマウスで自由に囲むと、囲んだ部分だけが切り出されて選ばれます（線の上から囲み始めても大丈夫）。囲み終わったら枠の中をドラッグして移動'};
-hints.pick='線や枠を押すと選べます（ドラッグで移動）。範囲で選ぶときは「四角で囲む」か「投げ縄」を押してください';hints.select=hints.pick;
+hints.pick='線や枠を押すと選べます（ドラッグで移動）。空いている所をドラッグすると四角で囲んで選べます。自由な形で囲むときは「投げ縄」';hints.select=hints.pick;
 function chooseTool(value) {
  finish();tool=value;
  for(const name of ['text','pen','eraser','select']){$('tool-'+name).classList.toggle('selected',tool===name);$('tool-'+name).setAttribute('aria-pressed',String(tool===name));}

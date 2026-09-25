@@ -852,3 +852,24 @@ body .message{position:fixed;top:56px;right:16px;left:auto;margin:0;max-width:mi
 .sizes .fmt-size[data-size="28"]{font-size:13px;font-weight:400}
 .sizes .fmt-size[data-size="36"]{font-size:14px;font-weight:600}
 .sizes .fmt-size[data-size="48"]{font-size:16px;font-weight:700}
+
+/* ---------- chosen buttons are obvious at a glance: solid green, white text, check mark ---------- */
+body .modes button.selected,
+body .tool-group button.selected:not(.swatch),
+body button[aria-pressed=true]:not(.swatch):not(.fmt-color),
+body #view-toggle[aria-expanded=true],body #layers-toggle[aria-expanded=true],
+body .trash-toggle.active{background:#2f5a4a;border-color:#2f5a4a;color:#fff;font-weight:700;box-shadow:0 2px 6px #2f5a4a40}
+body .modes button.selected .icon,body .modes button.selected>span,
+body .tool-group button.selected:not(.swatch) .icon,
+body button[aria-pressed=true]:not(.swatch):not(.fmt-color) .icon,
+body #view-toggle[aria-expanded=true] .icon,body #layers-toggle[aria-expanded=true] .icon,
+body .trash-toggle.active .icon{color:#fff;stroke:#fff}
+body .modes button.selected:hover,body .tool-group button.selected:not(.swatch):hover,body button[aria-pressed=true]:not(.swatch):not(.fmt-color):hover{background:#264b3e}
+body .tool-group .sub-options button.selected::after,body .toolbar-context button.selected:not(.swatch)::after{content:"✓";margin-left:4px;font-weight:700}
+/* colour swatches: a thick dark ring around the chosen one */
+body .tool-group .swatch.selected{outline:3px solid #253d37;outline-offset:2px;transform:scale(1.12)}
+body .tool-group .swatch[data-color="#ffffff"].selected{outline:3px solid #253d37;outline-offset:2px}
+body .tool-group .swatch.selected,body .tool-group .swatch[data-color="#ffffff"].selected{outline:none;transform:none;background:var(--swatch);box-shadow:0 0 0 3px #fff,0 0 0 6px #253d37;margin:0 4px}
+body .tool-group .swatch.selected,body .tool-group .swatch[data-color="#ffffff"].selected{box-shadow:0 0 0 2px #fff,0 0 0 5px #253d37;margin:0 5px}
+body .toolbar-context .colors{padding-top:6px;padding-bottom:6px}
+body .tool-group .swatch.selected{width:30px;height:30px;min-height:30px;border-radius:50%;flex:none;padding:0}

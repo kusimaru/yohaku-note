@@ -1495,11 +1495,13 @@ function chooseTool(value) {
  clearSelection();updateToolPresentation();
 }
 function chooseSelectMode(value) {
+ if(value&&tool==='select'&&selectMode===value)value=null; // pressing the chosen mode again turns it off
  selectMode=value;hints.select=value?hints[value]:hints.pick;
  for(const name of ['rect','lasso']){$('select-'+name).classList.toggle('selected',selectMode===name);$('select-'+name).setAttribute('aria-pressed',String(selectMode===name));}
  chooseTool('select');
 }
 $('select-rect').onclick=()=>chooseSelectMode('rect');$('select-lasso').onclick=()=>chooseSelectMode('lasso');
+// eraser mode buttons, tool buttons etc. carry .selected / aria-pressed; the CSS below makes that state obvious
 function chooseEraser(value) {
  eraserMode=value;
  for(const name of ['part','whole']){$('eraser-'+name).classList.toggle('selected',eraserMode===name);$('eraser-'+name).setAttribute('aria-pressed',String(eraserMode===name));}

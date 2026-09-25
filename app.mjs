@@ -1274,15 +1274,19 @@ const activeGesture=()=>gesture&&['ink','lasso','marquee','drag','move','resize'
 // must not scroll it: the hand usually rests on the glass before the pen tip arrives, which moved the page
 // up and down mid-word on iPad. A wide contact (radius >= 22 px) is treated as a palm straight away.
 let lastPenAt=-1e9;
-for(const ev of ['pointerdown','pointermove'])document.addEventListener(ev,e=>{if(e.pointerType==='pen')lastPenAt=performance.now();},{capture:true,passive:true});
+for(const ev of ['pointerdown','pointermove'])document.addEventListener(ev,e=>{if(e.pointerType==='pen'&&sheet.contains(e.target))lastPenAt=performance.now();},{capture:true,passive:true}); // pen on the paper only; a pen tap on a button is not "writing"
 const inkToolNow=()=>tool==='pen'||tool==='eraser'||tool==='select'||(tool==='text'&&$('auto-pen').checked);
-const palmTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType!=='stylus'&&Math.max(t.radiusX||0,t.radiusY||0)>=22);
+// iPad reports fingertips with radii around 20-35 px, so only clearly wider contacts count as a palm, and only for the drawing tools
+const palmTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType!=='stylus'&&Math.max(t.radiusX||0,t.radiusY||0)>=45);
 const penBusy=()=>activeGesture()||performance.now()-lastPenAt<1500;
 let pinchActive=false;
 sheet.addEventListener('touchstart',e=>{
  if(!ready||document.body.classList.contains('reading')||e.touches.length>=2)return;
  if(e.target instanceof Element&&e.target.closest('button,.block-bar,.resize,select,input,audio,video,.media-view'))return; // controls keep their tap
  const inkTool=inkToolNow();
+ // text tool: a finger tap must reach the click handler (it creates a text box); only stylus touches and
+ // touches during an active stroke are taken. Drawing tools: also palms and fingers right after the pen.
+ if(tool==='text'){if((stylusTouch(e)&&inkTool)||activeGesture()||(inkTool&&penBusy()&&palmTouch(e)))e.preventDefault();return;}
  if((stylusTouch(e)&&inkTool)||activeGesture()||(inkTool&&(penBusy()||palmTouch(e))))e.preventDefault();
 },{passive:false});
 sheet.addEventListener('touchmove',e=>{if(e.touches.length>=2)return;if(activeGesture()||(inkToolNow()&&penBusy()))e.preventDefault();},{passive:false});

@@ -4,6 +4,9 @@ export const pageWidth=p=>Number.isFinite(p?.width)&&p.width>PAGE_WIDTH?Math.min
 // ---- rich text runs ----
 // A text block stores plain `text` and optional `runs`: [{text,bold?,size?,color?}|{hr:true}].
 export const DEFAULT_TEXT_COLOR='#2b3f38',MIN_FONT=8,MAX_FONT=72;
+// base font size of a text box: new boxes carry fontSize 28; boxes made before this have none and stay at 15
+export const TEXT_BASE=28,LEGACY_TEXT_BASE=15;
+export const blockFontSize=b=>Number.isInteger(b?.fontSize)&&b.fontSize>=MIN_FONT&&b.fontSize<=MAX_FONT?b.fontSize:LEGACY_TEXT_BASE;
 const sameFormat=(a,b)=>!!a.bold===!!b.bold&&(a.size||0)===(b.size||0)&&(a.color||'')===(b.color||'');
 export function normalizeRuns(runs) {
  const out=[];
@@ -35,7 +38,7 @@ function validateRuns(runs,bad) {
  }
 }
 export function newTextBlock(x=64,y=64,text='') {
- return {id:crypto.randomUUID(),type:'text',x,y,width:Math.min(800,PAGE_WIDTH-x-24),height:120,text};
+ return {id:crypto.randomUUID(),type:'text',x,y,width:Math.min(800,PAGE_WIDTH-x-24),height:120,text,fontSize:TEXT_BASE};
 }
 // ---- ink layers (handwriting only) ----
 export const MAX_LAYERS=10;
@@ -418,7 +421,7 @@ export function validateBackup(doc) {
      ![o.x,o.y,o.width,o.height].every(Number.isFinite)||o.x<0||o.y<0||o.width<40||o.height<24||
      o.x+o.width>width+.01||o.y+o.height>height+.01)bad();
     blockIds.add(o.id);
-    if(o.type==='text'){if(typeof o.text!=='string'||o.text.length>200000)bad();if(o.runs!==undefined)validateRuns(o.runs,bad);}
+    if(o.type==='text'){if(typeof o.text!=='string'||o.text.length>200000)bad();if(o.runs!==undefined)validateRuns(o.runs,bad);if(o.fontSize!==undefined&&(!Number.isInteger(o.fontSize)||o.fontSize<MIN_FONT||o.fontSize>MAX_FONT))bad();}
     else if(o.type==='media'){if(!['audio','video'].includes(o.kind)||typeof o.mediaId!=='string'||!o.mediaId||o.mediaId.length>100||(o.name!==undefined&&(typeof o.name!=='string'||o.name.length>120))||(o.duration!==undefined&&!Number.isFinite(o.duration)))bad();}
     else {if(typeof o.src!=='string'||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(o.src)||o.src.length>16000000)bad();totalImages+=o.src.length;if(totalImages>65000000)bad();}
    }

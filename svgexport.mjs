@@ -1,4 +1,4 @@
-import { PAGE_WIDTH, pageWidth, inkWidth, blockRuns, ensureLayers, DEFAULT_TEXT_COLOR } from './model.mjs';
+import { PAGE_WIDTH, pageWidth, blockFontSize, inkWidth, blockRuns, ensureLayers, DEFAULT_TEXT_COLOR } from './model.mjs';
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const num=v=>String(Math.round(v*100)/100);
 const idOf=s=>String(s).replace(/[^\w\u3040-\u30ff\u3400-\u9fff\-]/g,'_').slice(0,40)||'layer';
@@ -29,9 +29,9 @@ function textElement(b) {
  let y=b.y+8,out='';const lineHeight=size=>Math.round(size*1.8);
  for(const line of lines){
   if(line[0]?.hr){out+='<line x1="'+num(b.x+10)+'" y1="'+num(y+6)+'" x2="'+num(b.x+b.width-10)+'" y2="'+num(y+6)+'" stroke="#9fb2a6" stroke-width="1.5"/>';y+=16;continue;}
-  const size=Math.max(15,...line.map(r=>r.size||15)),lh=lineHeight(size);y+=lh;
+  const base=blockFontSize(b),size=Math.max(base,...line.map(r=>r.size||base)),lh=lineHeight(size);y+=lh;
   if(!line.length)continue;
-  out+='<text x="'+num(b.x+10)+'" y="'+num(y-lh*.3)+'" font-size="15" font-family="Yu Gothic UI, Meiryo, sans-serif" fill="'+DEFAULT_TEXT_COLOR+'" xml:space="preserve">';
+  out+='<text x="'+num(b.x+10)+'" y="'+num(y-lh*.3)+'" font-size="'+base+'" font-family="Yu Gothic UI, Meiryo, sans-serif" fill="'+DEFAULT_TEXT_COLOR+'" xml:space="preserve">';
   for(const r of line){
    const attrs=[];if(r.bold)attrs.push('font-weight="bold"');if(r.size)attrs.push('font-size="'+r.size+'"');if(r.color)attrs.push('fill="'+r.color+'"');
    out+=attrs.length?'<tspan '+attrs.join(' ')+'>'+esc(r.text)+'</tspan>':esc(r.text);

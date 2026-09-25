@@ -72,7 +72,7 @@
    <label for="eraser-size">大きさ</label><input id="eraser-size" type="range" min="1" max="40" value="8" disabled><output id="eraser-size-value" for="eraser-size">8</output>
   </div>
   <div class="tool-group sub-options" id="select-options" hidden>
-   <button id="select-rect" class="selected" aria-pressed="true" disabled title="四角で囲んで、触れた線をまるごと選ぶ"><svg class="icon" aria-hidden="true"><use href="#i-square-dashed"/></svg>四角で囲む</button>
+   <button id="select-rect" aria-pressed="false" disabled title="四角で囲んで、触れた線をまるごと選ぶ"><svg class="icon" aria-hidden="true"><use href="#i-square-dashed"/></svg>四角で囲む</button>
    <button id="select-lasso" aria-pressed="false" disabled title="自由に囲んだ部分だけを選ぶ"><svg class="icon" aria-hidden="true"><use href="#i-lasso"/></svg>投げ縄</button>
   </div>
   <div class="tool-group colors" aria-label="インクの色"><span class="group-label"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg>色</span>
@@ -93,7 +93,7 @@
   <div class="text-tools" aria-label="文字の書式">
    <span class="group-label"><svg class="icon" aria-hidden="true"><use href="#i-type"/></svg>文字</span>
    <div class="tool-group"><button id="fmt-bold" title="選択した文字を太字にする（選択がなければ入力欄全体）" disabled><svg class="icon" aria-hidden="true"><use href="#i-bold"/></svg>太字</button></div>
-   <div class="tool-group sizes" aria-label="文字の大きさ"><button id="fmt-smaller" class="icon-only" title="文字を小さく" aria-label="文字を小さく" disabled><svg class="icon" aria-hidden="true"><use href="#i-text-smaller"/></svg></button><button id="fmt-larger" class="icon-only" title="文字を大きく" aria-label="文字を大きく" disabled><svg class="icon" aria-hidden="true"><use href="#i-text-larger"/></svg></button><button class="fmt-size" data-size="12" disabled>小</button><button class="fmt-size" data-size="15" disabled>標準</button><button class="fmt-size" data-size="20" disabled>大</button><button class="fmt-size" data-size="28" disabled>特大</button></div>
+   <div class="tool-group sizes" aria-label="文字の大きさ"><button id="fmt-smaller" class="icon-only" title="文字を小さく" aria-label="文字を小さく" disabled><svg class="icon" aria-hidden="true"><use href="#i-text-smaller"/></svg></button><button id="fmt-larger" class="icon-only" title="文字を大きく" aria-label="文字を大きく" disabled><svg class="icon" aria-hidden="true"><use href="#i-text-larger"/></svg></button><button class="fmt-size" data-size="20" disabled>小</button><button class="fmt-size" data-size="28" disabled>標準</button><button class="fmt-size" data-size="36" disabled>大</button><button class="fmt-size" data-size="48" disabled>特大</button></div>
    <div class="tool-group fmt-colors" aria-label="文字の色">
     <button class="fmt-color" data-color="#bf5860" style="--swatch:#bf5860" aria-label="文字を赤色にする" disabled></button>
     <button class="fmt-color" data-color="#4268b0" style="--swatch:#4268b0" aria-label="文字を青色にする" disabled></button>

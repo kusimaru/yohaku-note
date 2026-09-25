@@ -846,3 +846,9 @@ body .message-close .icon{width:18px;height:18px}
 /* notices float over the page (top right) so showing/hiding them never moves the paper */
 body .message{position:fixed;top:56px;right:16px;left:auto;margin:0;max-width:min(560px,calc(100vw - 32px));z-index:95;box-shadow:0 10px 30px #00000026}
 @media(max-width:700px){body .message{top:52px;left:8px;right:8px;max-width:none}}
+
+/* size buttons after the base moved to 28px */
+.sizes .fmt-size[data-size="20"]{font-size:11px;font-weight:400}
+.sizes .fmt-size[data-size="28"]{font-size:13px;font-weight:400}
+.sizes .fmt-size[data-size="36"]{font-size:14px;font-weight:600}
+.sizes .fmt-size[data-size="48"]{font-size:16px;font-weight:700}

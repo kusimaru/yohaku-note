@@ -980,6 +980,25 @@ function syncEditor(ed,block) {
  if(lastRuns.get(ed)!==key){runsToDom(ed,runs);lastRuns.set(ed,key);}
  ed.dataset.empty=String(!block.text);
 }
+// Copy the whole text of a text box: plain text plus formatted HTML where the browser allows it.
+async function copyBlockText(id,el){
+ const owner=pageById(el.dataset.pageId)||page(),b=blockOf(id,owner);if(!b)return;
+ const text=b.text||'';if(!text){message('この入力欄は空です。');return;}
+ const ed=el.querySelector('.editor');let done=false;
+ try{
+  if(navigator.clipboard&&window.ClipboardItem&&ed){
+   const html='<div style="font-size:'+blockFontSize(b)+'px">'+ed.innerHTML+'</div>';
+   await navigator.clipboard.write([new ClipboardItem({'text/plain':new Blob([text],{type:'text/plain'}),'text/html':new Blob([html],{type:'text/html'})})]);done=true;
+  }
+ }catch{}
+ if(!done){try{await navigator.clipboard.writeText(text);done=true;}catch{}}
+ if(!done){ // older Safari: copy through a temporary text area inside the same tap
+  const ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';document.body.append(ta);
+  ta.select();ta.setSelectionRange(0,text.length);try{done=document.execCommand('copy');}catch{}ta.remove();
+ }
+ message(done?'文章をコピーしました（'+text.length+' 字）。ほかの場所に貼り付けられます。':'コピーできませんでした。文章を長押しして選び、コピーしてください。');
+ const btn=el.querySelector('.block-bar .copy');if(btn&&done){btn.classList.add('done');setTimeout(()=>btn.classList.remove('done'),1200);}
+}
 function renderBlocks() {
  const p=page(),seen=new Set();
  for(const b of p.blocks){
@@ -989,9 +1008,16 @@ function renderBlocks() {
    el=document.createElement('div');el.dataset.id=b.id;el.dataset.pageId=p.id;el.className='block '+b.type;
    const bar=document.createElement('div');bar.className='block-bar';
    const grip=document.createElement('button');grip.type='button';grip.className='grip';grip.append(icon('move'),'移動');grip.setAttribute('aria-label',(b.type==='image'?'画像':b.type==='media'?'録音・動画':'入力欄')+'を移動');
-   const remove=document.createElement('button');remove.type='button';remove.className='remove';remove.append(icon('x'));remove.setAttribute('aria-label',(b.type==='image'?'画像':b.type==='media'?'録音・動画':'入力欄')+'を削除');remove.title='削除';
+   const remove=document.createElement('button');remove.type='button';remove.className='remove';remove.append(icon('x'),'削除');remove.setAttribute('aria-label',(b.type==='image'?'画像':b.type==='media'?'録音・動画':'入力欄')+'を削除');remove.title='削除';
    remove.onclick=()=>removeBlock(b.id);
-   bar.append(grip,remove);el.append(bar);
+   bar.append(grip);
+   if(b.type==='text'){
+    const copy=document.createElement('button');copy.type='button';copy.className='copy';copy.append(icon('copy'),'コピー');copy.title='この入力欄の文章をすべてコピー';copy.setAttribute('aria-label','入力欄の文章をすべてコピー');
+    copy.addEventListener('mousedown',e=>e.preventDefault()); // keep the caret where it is
+    copy.onclick=()=>copyBlockText(b.id,el);
+    bar.append(copy);
+   }
+   bar.append(remove);el.append(bar);
    if(b.type==='text'){
     const ed=document.createElement('div');ed.className='editor';ed.contentEditable='true';ed.dataset.placeholder='ここに入力…';ed.spellcheck=false;
     ed.setAttribute('role','textbox');ed.setAttribute('aria-multiline','true');ed.setAttribute('aria-label','テキスト');
@@ -1158,6 +1184,7 @@ sheet.addEventListener('pointerdown',e=>{
   try{sheet.setPointerCapture(e.pointerId);}catch{}
   return;
  }
+ if(t?.closest('.block-bar'))return; // copy / delete buttons: let the click through
  if(e.pointerType==='mouse'&&e.button!==0)return;
  if(tool==='select'){
   const point=coordinates(e),additive=e.shiftKey;sheet.focus({preventScroll:true});

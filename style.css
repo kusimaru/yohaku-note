@@ -873,3 +873,14 @@ body .tool-group .swatch.selected,body .tool-group .swatch[data-color="#ffffff"]
 body .tool-group .swatch.selected,body .tool-group .swatch[data-color="#ffffff"].selected{box-shadow:0 0 0 2px #fff,0 0 0 5px #253d37;margin:0 5px}
 body .toolbar-context .colors{padding-top:6px;padding-bottom:6px}
 body .tool-group .swatch.selected{width:30px;height:30px;min-height:30px;border-radius:50%;flex:none;padding:0}
+
+/* ---------- block bar (移動・コピー・削除): sized in screen pixels whatever the page zoom, readable on an iPad mini ---------- */
+body .block-bar{top:calc((var(--ui-btn) + 8px) * -1 * var(--ui-inverse-scale,1));gap:calc(6px * var(--ui-inverse-scale,1));left:0}
+body .block-bar button{min-height:calc(var(--ui-btn) * var(--ui-inverse-scale,1));min-width:calc(var(--ui-btn) * var(--ui-inverse-scale,1));
+ font-size:calc(var(--ui-fs) * var(--ui-inverse-scale,1));padding:calc(4px * var(--ui-inverse-scale,1)) calc(12px * var(--ui-inverse-scale,1));
+ gap:calc(6px * var(--ui-inverse-scale,1));border-width:calc(1.5px * var(--ui-inverse-scale,1));border-radius:calc(10px * var(--ui-inverse-scale,1));
+ background:#fff;border-color:#8fa99a;color:#253d37;font-weight:700;box-shadow:0 calc(2px * var(--ui-inverse-scale,1)) calc(8px * var(--ui-inverse-scale,1)) #203b2922}
+body .block-bar .icon{width:calc(var(--ui-icon) * var(--ui-inverse-scale,1));height:calc(var(--ui-icon) * var(--ui-inverse-scale,1))}
+body .block-bar .remove{color:#a2363b;border-color:#d8a19b}
+body .block-bar .copy.done{background:#2f5a4a;border-color:#2f5a4a;color:#fff}
+body .block-bar .copy.done .icon{color:#fff}

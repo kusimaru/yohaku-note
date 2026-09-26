@@ -1222,6 +1222,8 @@ sheet.addEventListener('pointerdown',e=>{
  const ink=tool!=='text'||(e.pointerType==='pen'&&$('auto-pen').checked);
  if(!ink)return;
  e.preventDefault();startInk(e);inputStatus(e);
+ // text tool + pen on a box: remember it, so that a short tap (not a stroke) opens the box's buttons instead of leaving a dot
+ if(gesture&&gesture.type==='ink'&&!gesture.erase&&blockEl&&tool==='text')Object.assign(gesture,{tapBlock:blockEl.dataset.id,t0:performance.now()});
 },{capture:true});
 sheet.addEventListener('pointermove',e=>{
  if(!gesture)updateEraserCursor(e);
@@ -1291,6 +1293,13 @@ function finish() {
   if(r.x1-r.x0>3||r.y1-r.y0>3)applyMarquee(r,completed.additive);
   return;
  }
+ if(completed.type==='ink'&&completed.tapBlock&&completed.stroke){
+  const pts=completed.stroke.points;let len=0;for(let i=1;i<pts.length;i++)len+=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);
+  if(len<6&&performance.now()-completed.t0<450){ // a tap on a picture / box with the pen: select it, no dot
+   const p=pageById(completed.pageId);if(p)p.strokes=p.strokes.filter(x=>x!==completed.stroke);
+   redraw();setActive(completed.tapBlock);renderBlocks();return;
+  }
+ }
  if(completed.changed){const p=pageById(completed.pageId);if(p)commit(completed.before,p);if(completed.type==='ink'){if(completed.needsRedraw)redraw();else{updateHint();renderSelection();}}else{renderBlocks();redraw();}}
  if(completed.type==='ink')perf.finish=Math.round(performance.now()-t0);
 }
@@ -1341,6 +1350,17 @@ for(const event of ['touchend','touchcancel'])sheet.addEventListener(event,e=>{
 window.addEventListener('blur',finish);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){finish();save();}});
 window.addEventListener('beforeunload',e=>{finish();if(dirty||saving){e.preventDefault();e.returnValue='';}});
+// pen / eraser tool: a finger tap on a picture or box shows its 移動・削除 buttons (the pen keeps drawing over it);
+// a finger tap elsewhere hides them. Scrolling with a finger does not produce a click, so it is unaffected.
+let lastSheetPointer='mouse';
+sheet.addEventListener('pointerdown',e=>{lastSheetPointer=e.pointerType;},{capture:true,passive:true});
+sheet.addEventListener('click',e=>{
+ if(!ready||!(tool==='pen'||tool==='eraser'))return;
+ if((e.pointerType||lastSheetPointer)!=='touch')return;
+ if(e.target instanceof Element&&e.target.closest('.block-bar'))return;
+ const [x,y]=coordinates(e),hit=[...page().blocks].reverse().find(b=>x>=b.x&&x<=b.x+b.width&&y>=b.y&&y<=b.y+b.height);
+ setActive(hit?hit.id:null);
+});
 sheet.addEventListener('click',e=>{
  if(!ready||tool!=='text'||performance.now()-lastInkEnd<500)return;
  const t=e.target;

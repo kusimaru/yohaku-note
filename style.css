@@ -885,3 +885,8 @@ body .block-bar .remove{color:#a2363b;border-color:#d8a19b}
 body .block-bar .copy.done{background:#2f5a4a;border-color:#2f5a4a;color:#fff}
 body .block-bar .copy.done .icon{color:#fff}
 body .block.bar-below .block-bar{top:auto;bottom:calc((var(--ui-btn) + 8px) * -1 * var(--ui-inverse-scale,1))}
+/* select tool: a selected picture / box shows its 移動・削除 buttons too (iPad has no Delete key) */
+body .sheet.select .block.selected .block-bar{display:flex}
+/* pen tool: the box chosen with a finger tap gets its buttons back (and can be moved / deleted) */
+body .sheet.ink .block.active{pointer-events:auto}
+body .sheet.ink .block.active .block-bar{display:flex}

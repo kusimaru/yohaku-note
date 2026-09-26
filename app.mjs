@@ -1179,6 +1179,7 @@ for(const ev of ['pointerover','pointerenter','pointermove','pointerdown'])sheet
 sheet.addEventListener('pointerleave',e=>{if(e.pointerType==='pen'){clearTimeout(penNearTimer);penNearTimer=setTimeout(()=>sheet.classList.remove('pen-near'),400);}});
 sheet.addEventListener('pointerdown',e=>{
  if(!ready||pinchActive)return;
+ if(e.pointerType==='touch'&&performance.now()-lastPenAt<1500)return; // hand resting while writing: no select / drag / move
  if(gesture){if(gesture.id===e.pointerId)return;finish();}
  const t=e.target instanceof Element?e.target:null;
  const grip=t?.closest('.grip'),resize=t?.closest('.resize'),blockEl=t?.closest('.block');
@@ -1330,8 +1331,9 @@ const activeGesture=()=>gesture&&['ink','lasso','marquee','drag','move','resize'
 // While the pen is writing (and for 1.5 s after it last touched), a palm or finger landing on the page
 // must not scroll it: the hand usually rests on the glass before the pen tip arrives, which moved the page
 // up and down mid-word on iPad. A wide contact (radius >= 22 px) is treated as a palm straight away.
-let lastPenAt=-1e9;
-for(const ev of ['pointerdown','pointermove'])document.addEventListener(ev,e=>{if(e.pointerType==='pen'&&sheet.contains(e.target))lastPenAt=performance.now();},{capture:true,passive:true}); // pen on the paper only; a pen tap on a button is not "writing"
+let lastPenAt=-1e9,cancelPinch=()=>{};
+// the pen wins over any two-finger gesture: a palm or little finger resting on the glass often reports two contacts
+for(const ev of ['pointerdown','pointermove'])document.addEventListener(ev,e=>{if(e.pointerType==='pen'&&sheet.contains(e.target)){lastPenAt=performance.now();if(pinchActive)cancelPinch();}},{capture:true,passive:true}); // pen on the paper only; a pen tap on a button is not "writing"
 const inkToolNow=()=>tool==='pen'||tool==='eraser'||tool==='select'||(tool==='text'&&$('auto-pen').checked);
 // iPad reports fingertips with radii around 20-35 px, so only clearly wider contacts count as a palm, and only for the drawing tools
 const palmTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType!=='stylus'&&Math.max(t.radiusX||0,t.radiusY||0)>=45);
@@ -1370,12 +1372,14 @@ sheet.addEventListener('pointerdown',e=>{lastSheetPointer=e.pointerType;},{captu
 sheet.addEventListener('click',e=>{
  if(!ready||!(tool==='pen'||tool==='eraser'))return;
  if((e.pointerType||lastSheetPointer)!=='touch')return;
+ if(performance.now()-lastPenAt<1500)return; // the hand while writing
  if(e.target instanceof Element&&e.target.closest('.block-bar'))return;
  const [x,y]=coordinates(e),hit=[...page().blocks].reverse().find(b=>x>=b.x&&x<=b.x+b.width&&y>=b.y&&y<=b.y+b.height);
  setActive(hit?hit.id:null);
 });
 sheet.addEventListener('click',e=>{
  if(!ready||tool!=='text'||performance.now()-lastInkEnd<500)return;
+ if((e.pointerType||lastSheetPointer)==='touch'&&performance.now()-lastPenAt<1500)return; // a palm lifting after pen writing must not create a text box
  const t=e.target;
  if(t!==sheet&&t!==canvas&&t!==blocksLayer&&t!==$('empty-hint')&&!$('empty-hint').contains(t)){return;}
  const [x,y]=coordinates(e);createTextBlock(x,y);
@@ -1968,17 +1972,37 @@ function initializePresentation(){
  // two-finger pinch on the page
  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
  const centre=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
- let pinchD0=0;
+ // A pinch only starts when (a) the pen has not been near the page for 2.5 s, (b) neither contact is palm-sized,
+ // and (c) the two fingers really move (spread/pinch or slide). A resting palm or little finger does none of that.
+ let pinchD0=0,pinchStart=null,pinchBlocked=false;
+ const penRecently=()=>performance.now()-lastPenAt<2500||sheet.classList.contains('pen-near')||!!gesture;
+ const palmSized=t=>t.some(x=>Math.max(x.radiusX||0,x.radiusY||0)>=25);
+ cancelPinch=()=>{ // pen arrived: drop the gesture, keep the zoom as it was
+  pinchActive=false;pinchStart=null;pinchBlocked=true;
+  if(preview){if(previewRaf){cancelAnimationFrame(previewRaf);previewRaf=0;}preview=null;paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';updateZoomUi(zoomFactor());}
+ };
  vp.addEventListener('touchstart',e=>{
-  if(e.touches.length!==2)return;
-  e.preventDefault();pinchActive=true;const t=[e.touches[0],e.touches[1]],[cx,cy]=centre(t);pinchD0=dist(t);beginPreview(cx,cy);
+  if(e.touches.length<2)return;
+  e.preventDefault();
+  if(e.touches.length!==2||penRecently()||palmSized([...e.touches])){if(pinchActive)cancelPinch();pinchBlocked=true;return;}
+  if(pinchBlocked)return; // still the same group of contacts that was rejected
+  const t=[e.touches[0],e.touches[1]];pinchActive=true;pinchD0=dist(t);pinchStart=centre(t);
  },{passive:false});
  vp.addEventListener('touchmove',e=>{
-  if(!preview||!pinchActive||e.touches.length<2)return;e.preventDefault();
-  const t=[e.touches[0],e.touches[1]];[preview.cx,preview.cy]=centre(t);preview.z=clampZoom(preview.z0*dist(t)/pinchD0);drawPreview();
+  if(e.touches.length>=2&&(pinchActive||pinchBlocked))e.preventDefault();
+  if(!pinchActive||e.touches.length<2)return;
+  if(penRecently()){cancelPinch();return;}
+  const t=[e.touches[0],e.touches[1]],[cx,cy]=centre(t),d=dist(t);
+  if(!preview){
+   const moved=Math.abs(d-pinchD0)>Math.max(14,pinchD0*.08)||Math.hypot(cx-pinchStart[0],cy-pinchStart[1])>24;
+   if(!moved)return;
+   beginPreview(pinchStart[0],pinchStart[1]);
+  }
+  preview.cx=cx;preview.cy=cy;preview.z=clampZoom(preview.z0*d/pinchD0);drawPreview();
  },{passive:false});
  for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,e=>{
-  if(!pinchActive||e.touches.length>=2)return;pinchActive=false;endPreview();
+  if(e.touches.length===0)pinchBlocked=false;
+  if(!pinchActive||e.touches.length>=2)return;pinchActive=false;pinchStart=null;if(preview)endPreview();
  });
  $('view-pan').onclick=()=>setReading(!document.body.classList.contains('reading'));
  // Ancestor capture runs before the existing drawing handlers. Native touch

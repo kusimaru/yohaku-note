@@ -5,7 +5,7 @@ export const pageWidth=p=>Number.isFinite(p?.width)&&p.width>PAGE_WIDTH?Math.min
 // A text block stores plain `text` and optional `runs`: [{text,bold?,size?,color?}|{hr:true}].
 export const DEFAULT_TEXT_COLOR='#2b3f38',MIN_FONT=8,MAX_FONT=72;
 // base font size of a text box: new boxes carry fontSize 28; boxes made before this have none and stay at 15
-export const TEXT_BASE=28,LEGACY_TEXT_BASE=15;
+export const MAX_INK_WIDTH=100,TEXT_BASE=28,LEGACY_TEXT_BASE=15;
 export const blockFontSize=b=>Number.isInteger(b?.fontSize)&&b.fontSize>=MIN_FONT&&b.fontSize<=MAX_FONT?b.fontSize:LEGACY_TEXT_BASE;
 const sameFormat=(a,b)=>!!a.bold===!!b.bold&&(a.size||0)===(b.size||0)&&(a.color||'')===(b.color||'');
 export function normalizeRuns(runs) {
@@ -437,7 +437,7 @@ export function validateBackup(doc) {
    if(p.activeLayer!==undefined&&!layerIds.has(p.activeLayer))bad();
   }
   for(const s of p.strokes){
-   if(!s||!/^#[0-9a-f]{6}$/i.test(s.color)||!Number.isFinite(s.width)||s.width<1||s.width>24||
+   if(!s||!/^#[0-9a-f]{6}$/i.test(s.color)||!Number.isFinite(s.width)||s.width<1||s.width>100||
     typeof s.pressure!=='boolean'||!Array.isArray(s.points)||s.points.length<1)bad();
    if(s.layer!==undefined&&(typeof s.layer!=='string'||s.layer.length>100||(layerIds&&!layerIds.has(s.layer))))bad();
    points+=s.points.length;if(points>2000000)bad();

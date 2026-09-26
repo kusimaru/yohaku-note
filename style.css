@@ -890,3 +890,21 @@ body .sheet.select .block.selected .block-bar{display:flex}
 /* pen tool: the box chosen with a finger tap gets its buttons back (and can be moved / deleted) */
 body .sheet.ink .block.active{pointer-events:auto}
 body .sheet.ink .block.active .block-bar{display:flex}
+
+/* ---------- pen width / eraser size: slider 1-100, ± steps, registered favourites ---------- */
+.size-ctl{display:inline-flex;align-items:center;gap:4px;flex:none}
+body .size-ctl input[type=range]{width:150px}
+body .size-ctl .w-step{width:36px;height:36px;min-height:36px;padding:0}
+body .size-ctl output{min-width:2.4em;text-align:center;font-weight:700;font-size:var(--ui-fs)}
+.presets{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;flex:none}
+body .presets .preset{min-height:38px;padding:3px 9px;gap:6px;border-radius:19px;background:#fff;border-color:#cfd8d0}
+.preset-dot{display:inline-block;border-radius:50%;background:currentColor;flex:none}
+.preset-num{font-weight:700;font-size:var(--ui-fs-sm);min-width:1.4em;text-align:left}
+body .preset-reg{min-height:38px;padding:3px 10px;font-size:var(--ui-fs-sm);border-style:dashed;border-color:#8fa99a;color:#2f5a4a;background:#fff;flex:none}
+body .preset-reg.remove{border-color:#d8a19b;color:#a2363b}
+body .width-group,body #eraser-options{flex-wrap:wrap}
+body .toolbar-context .width-group,body .toolbar-context #eraser-options{flex-wrap:wrap;flex-shrink:1;min-width:0;max-width:100%;row-gap:6px}
+body .toolbar-context .presets{flex-wrap:wrap}
+body .toolbar-context .width-group{flex:1 1 420px}
+body .toolbar-context #eraser-options{flex:1 1 520px}
+body .toolbar-context .presets{flex:1 1 auto;min-width:0}

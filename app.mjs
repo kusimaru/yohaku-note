@@ -1561,7 +1561,42 @@ function chooseEraser(value) {
  chooseTool('eraser');
 }
 $('tool-text').onclick=()=>chooseTool('text');$('tool-pen').onclick=()=>chooseTool('pen');$('tool-eraser').onclick=()=>chooseTool('eraser');$('tool-select').onclick=()=>chooseSelectMode(null); // no enclosing mode until 四角 or 投げ縄 is chosen
-$('eraser-size').oninput=e=>{eraserSize=Number(e.target.value);$('eraser-size-value').value=eraserSize;};
+// ---- pen width / eraser size: 1-100, ± buttons, and registered favourites (per device) ----
+function sizeControl({id,storeKey,defaults,onChange,what}){
+ const input=$(id),out=$(id+'-value'),box=$(id+'-presets'),reg=$(id+'-register'),MAX_PRESETS=8;
+ let presets=defaults.slice();
+ try{const saved=JSON.parse(localStorage.getItem(storeKey+'-presets')||'null');if(Array.isArray(saved))presets=saved.filter(v=>Number.isInteger(v)&&v>=1&&v<=100).slice(0,MAX_PRESETS);}catch{}
+ const persist=()=>{try{localStorage.setItem(storeKey+'-presets',JSON.stringify(presets));}catch{}};
+ const value=()=>Number(input.value);
+ function render(){
+  const v=value();box.replaceChildren();
+  for(const n of presets){
+   const b=document.createElement('button');b.type='button';b.className='preset';b.setAttribute('aria-pressed',String(n===v));b.title=what+' '+n;b.setAttribute('aria-label',what+' '+n);
+   const dot=el('span','preset-dot');const d=Math.max(3,Math.min(24,Math.round(3+Math.sqrt(n)*2.2)));dot.style.width=dot.style.height=d+'px';
+   b.append(dot,el('span','preset-num',String(n)));b.onclick=()=>set(n);box.append(b);
+  }
+  const has=presets.includes(v);reg.textContent=has?'登録を外す':'登録';reg.title=has?'この'+what+'（'+v+'）を登録から外す':'今の'+what+'（'+v+'）をよく使う'+what+'に登録';
+  reg.classList.toggle('remove',has);
+ }
+ function set(v,save=true){
+  v=Math.max(1,Math.min(100,Math.round(Number(v)||1)));input.value=String(v);out.value=String(v);onChange(v);
+  if(save){try{localStorage.setItem(storeKey,String(v));}catch{}}
+  render();
+ }
+ input.addEventListener('input',()=>set(input.value));
+ for(const b of document.querySelectorAll('.w-step[data-for="'+id+'"]'))b.onclick=()=>set(value()+Number(b.dataset.step));
+ reg.onclick=()=>{
+  const v=value();
+  if(presets.includes(v)){presets=presets.filter(x=>x!==v);message(what+' '+v+' を登録から外しました。');}
+  else if(presets.length>=MAX_PRESETS){message('登録できるのは '+MAX_PRESETS+' 個までです。使わないものを選んで「登録を外す」を押してください。');return;}
+  else{presets=[...presets,v].sort((a,b)=>a-b);message(what+' '+v+' を登録しました。');}
+  persist();render();
+ };
+ let start=Number(input.value);try{const saved=Number(localStorage.getItem(storeKey));if(saved>=1&&saved<=100)start=saved;}catch{}
+ set(start,false);
+ return {set};
+}
+sizeControl({id:'eraser-size',storeKey:'yohaku-eraser-size',defaults:[4,8,16,32,64],what:'大きさ',onChange:v=>{eraserSize=v;}});
 $('eraser-part').onclick=()=>chooseEraser('part');$('eraser-whole').onclick=()=>chooseEraser('whole');
 function setColor(value) {
  color=value;$('color').value=value;chooseTool('pen');
@@ -1569,7 +1604,7 @@ function setColor(value) {
 }
 document.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>setColor(b.dataset.color));
 $('color').oninput=e=>setColor(e.target.value);
-$('width').oninput=e=>{width=Number(e.target.value);$('width-value').value=width;};
+sizeControl({id:'width',storeKey:'yohaku-pen-width',defaults:[2,4,8,16,32],what:'太さ',onChange:v=>{width=v;}});
 $('page-title').oninput=e=>{page().title=e.target.value;breadcrumb();changed();renderPages();};
 function growAndReveal() {
  finish();const p=page(),before=snapshot(p),prev=p.height;
@@ -1800,7 +1835,7 @@ function initializePresentation(){
  const contextual=document.createElement('div');contextual.className='toolbar-context';contextual.setAttribute('aria-label','選択中の道具の設定');
  const penSettings=document.createElement('div');penSettings.id='pen-settings';penSettings.className='pen-settings';
  const modes=document.querySelector('.modes'),images=$('add-image').parentElement,historyEl=document.querySelector('.history');
- const textTools=document.querySelector('.text-tools'),colors=document.querySelector('.colors'),weight=$('width').parentElement;
+ const textTools=document.querySelector('.text-tools'),colors=document.querySelector('.colors'),weight=$('width').closest('.tool-group');
  const pressure=$('pressure').parentElement,auto=$('auto-pen').parentElement;
  penSettings.append(colors,weight,pressure,auto);
  primary.append(modes,images,historyEl);

@@ -908,3 +908,7 @@ body .toolbar-context .presets{flex-wrap:wrap}
 body .toolbar-context .width-group{flex:1 1 420px}
 body .toolbar-context #eraser-options{flex:1 1 520px}
 body .toolbar-context .presets{flex:1 1 auto;min-width:0}
+
+/* palm guard: one finger (or a resting little finger) never scrolls the paper; two fingers pan/zoom via the app */
+body.palm-guard .paper-viewport,body.palm-guard .sheet,body.palm-guard .sheet.ink,body.palm-guard .sheet.select,body.palm-guard.ios .sheet.ink,body.palm-guard.ios .sheet.select{touch-action:none}
+body.palm-guard.reading .paper-viewport,body.palm-guard.reading .sheet{touch-action:pan-x pan-y}

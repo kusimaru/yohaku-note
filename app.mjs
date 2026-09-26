@@ -1311,6 +1311,19 @@ for(const event of ['pointerup','pointercancel','lostpointercapture'])sheet.addE
 const stylusTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType==='stylus');
 // iPad / iPhone: the OS tells stylus and finger apart, so fingers may scroll the page even in
 // pen mode (stylus touches are default-prevented above). Other platforms keep touch-action:none.
+// Palm guard (Windows tablets such as the Surface Go): Windows cannot tell a resting palm or little finger
+// from a scrolling finger at the moment of contact, so with the guard on, one finger never moves the paper.
+// Two fingers still move and zoom it (see the pinch handling), taps still work, 閲覧 still scrolls.
+// Default: on for touch screens other than iPad/iPhone (their OS tells pen and finger apart).
+{
+ const isAppleTouch=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ let on=!isAppleTouch&&navigator.maxTouchPoints>0;
+ try{const v=localStorage.getItem('yohaku-palm-guard');if(v==='1')on=true;else if(v==='0')on=false;}catch{}
+ const apply=()=>{document.body.classList.toggle('palm-guard',on);$('palm-guard').setAttribute('aria-pressed',String(on));};
+ $('palm-guard').onclick=()=>{on=!on;try{localStorage.setItem('yohaku-palm-guard',on?'1':'0');}catch{}apply();
+  message(on?'指一本では紙が動かなくなりました。紙を動かすときは二本指でなぞるか、「閲覧」を使ってください。':'指一本で紙を動かせるように戻しました。');};
+ apply();
+}
 const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 if(isIOS)document.body.classList.add('ios');
 const activeGesture=()=>gesture&&['ink','lasso','marquee','drag','move','resize'].includes(gesture.type);

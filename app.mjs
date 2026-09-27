@@ -3,6 +3,7 @@ import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storag
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
 import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS, APPLE, defaultMime, blobToWav, getMediaDir, setMediaDir, folderSupported, folderPermission, writeToFolder } from './media.mjs';
+import { makeClip, encodeClip, decodeClip, placeClip } from './clip.mjs';
 import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
 import { normalizeRuns, runsToText, blockRuns, blockFontSize, DEFAULT_TEXT_COLOR, MIN_FONT, MAX_FONT, MAX_LAYERS, ensureLayers, activeLayerOf, addLayer, removeLayer, updateLayer, moveLayer } from './model.mjs';
 const off=document.createElement('canvas'),octx=off.getContext('2d');
@@ -654,6 +655,7 @@ $('new-category').onsubmit=e=>{
 
 function breadcrumb(){const p=page(),sec=sectionOf(doc,p.sectionId),nb=sec&&notebookOf(doc,sec.notebookId);$('breadcrumb').textContent=(nb?nb.name+' › ':'')+(sec?sec.name+' › ':'')+(p.title||'名称未設定');}
 function showPage() {
+ settleLasso();
  activeBlock=null;editing=null;selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;ensureLayers(page());
  if(document.activeElement&&sheet.contains(document.activeElement))document.activeElement.blur();
  $('page-title').value=page().title;
@@ -863,7 +865,21 @@ function selectionBounds(p=page()) {
  return b;
 }
 const selectionEmpty=()=>selection.strokes.size===0&&selection.blocks.size===0;
-function clearSelection(){selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;renderSelection();}
+function clearSelection(){settleLasso();selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;renderSelection();}
+// A lasso split is provisional: it becomes permanent only when the cut-out part is moved, deleted or cut.
+// Leaving the selection without doing that puts the original strokes back, so the rectangle select
+// (which takes whole strokes) never finds a stroke cut up by an earlier, unused lasso.
+let pendingLasso=null; // {pageId, original: strokes array before the first cut, cut: strokes array after, entries: undo snapshots}
+function settleLasso() {
+ const pend=pendingLasso;pendingLasso=null;if(!pend)return false;
+ const p=pageById(pend.pageId);if(!p||p.strokes!==pend.cut)return false;
+ const h=historyFor(p.id);while(h.undo.length&&pend.entries.includes(h.undo.at(-1)))h.undo.pop();
+ p.strokes=pend.original;
+ if(p===page()){selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;}
+ changed(p);syncHistory();if(p===page()){redraw();renderSelection();}
+ return true;
+}
+function polygonArea(poly){let a=0;for(let i=0,j=poly.length-1;i<poly.length;j=i++)a+=(poly[j][0]+poly[i][0])*(poly[j][1]-poly[i][1]);return Math.abs(a)/2;}
 function renderSelection() {
  if(!doc)return;const p=page();
  selection.strokes=new Set([...selection.strokes].filter(s=>p.strokes.includes(s)));
@@ -876,7 +892,7 @@ function renderSelection() {
  if(!gesture||gesture.type!=='lasso'){lassoEl.classList.toggle('settled',!!selectionLasso);renderLasso(selectionLasso||[]);}
  for(const el of blocksLayer.children)el.classList.toggle('selected',selection.blocks.has(el.dataset.id));
  const n=selection.strokes.size+selection.blocks.size;
- if(tool==='select')$('tool-hint').textContent=n?n+'個を選択中。ドラッグまたは矢印キーで移動、Deleteで削除、Escで解除':hints.select;
+ if(tool==='select')$('tool-hint').textContent=n?n+'個を選択中。ドラッグまたは矢印キーで移動、Ctrl+Cでコピー、Deleteで削除、Escで解除':hints.select;
 }
 function insideSelection(x,y) {
  if(selectionEmpty())return false;
@@ -921,6 +937,7 @@ function applyMarquee(r,additive) {
  renderSelection();
 }
 function applyLasso(polygon,additive) {
+ if(!additive)settleLasso();
  const p=page(),before=snapshot(p);
  if(!additive)selection={strokes:new Set(),blocks:new Set()};
  let split=false;const next=[];const L=editableLayer(true),lid=L?L.id:null;
@@ -931,7 +948,13 @@ function applyLasso(polygon,additive) {
   next.push(...r.outside,...r.inside);for(const f of r.inside)selection.strokes.add(f);
  }
  for(const b of p.blocks)if(pointInPolygon([b.x+b.width/2,b.y+b.height/2],polygon))selection.blocks.add(b.id);
- if(split){p.strokes=next;commit(before,p);redraw();}
+ if(split){
+  const pend=pendingLasso&&pendingLasso.pageId===p.id&&pendingLasso.cut===p.strokes?pendingLasso:null;
+  const original=pend?pend.original:p.strokes;
+  p.strokes=next;commit(before,p);
+  pendingLasso={pageId:p.id,original,cut:next,entries:[...(pend?pend.entries:[]),historyFor(p.id).undo.at(-1)]};
+  redraw();
+ }
  renderSelection();
 }
 function renderLasso(points) {
@@ -998,8 +1021,17 @@ async function copyBlockText(id,el){
  const owner=pageById(el.dataset.pageId)||page(),b=blockOf(id,owner);if(!b)return;
  const text=b.text||'';if(!text){message('この入力欄は空です。');return;}
  const ed=el.querySelector('.editor');let done=false;
+ // First through a copy event, which also carries the clip (kusimaru-clip) so pasting into 余白ノート /
+ // 日記カレンダー keeps bold / size / colour. The async clipboard API below is the fallback.
+ {
+  const {html:clipHtml}=encodeClip(makeClip({from:'yohaku-note',unit:W,texts:[{x:b.x,y:b.y,width:b.width,height:b.height,text,runs:blockRuns(b)}]}));
+  const put=e=>{e.clipboardData.setData('text/plain',text);e.clipboardData.setData('text/html',clipHtml);e.preventDefault();};
+  document.addEventListener('copy',put,{capture:true});
+  try{done=document.execCommand('copy');}catch{}
+  document.removeEventListener('copy',put,{capture:true});
+ }
  try{
-  if(navigator.clipboard&&window.ClipboardItem&&ed){
+  if(!done&&navigator.clipboard&&window.ClipboardItem&&ed){
    const html='<div style="font-size:'+blockFontSize(b)+'px">'+ed.innerHTML+'</div>';
    await navigator.clipboard.write([new ClipboardItem({'text/plain':new Blob([text],{type:'text/plain'}),'text/html':new Blob([html],{type:'text/html'})})]);done=true;
   }
@@ -1051,8 +1083,15 @@ function renderBlocks() {
     });
     ed.addEventListener('paste',e=>{
      const files=[...(e.clipboardData?.files||[])];if(files.some(f=>f.type.startsWith('image/')))return;
-     e.preventDefault();const t=e.clipboardData?.getData('text/plain');if(t)document.execCommand('insertText',false,t);
+     e.preventDefault();
+     // 余白ノート・日記カレンダーからのコピー: 文章だけなら書式ごと入力位置へ、手書きや画像を含むならページに置く
+     const clip=decodeClip(e.clipboardData?.getData('text/html'));
+     if(clip&&(clip.images.length||clip.strokes.length)){pasteClip(clip);return;}
+     if(clip){insertClipRuns(clip);return;}
+     const t=e.clipboardData?.getData('text/plain');if(t)document.execCommand('insertText',false,t);
     });
+    ed.addEventListener('copy',e=>copyEditorText(e,ed,b.id,false));
+    ed.addEventListener('cut',e=>copyEditorText(e,ed,b.id,true));
     ed.addEventListener('focus',()=>setActive(b.id));
     ed.addEventListener('blur',()=>{
      editing=null;const owner=pageById(el.dataset.pageId);const cur=owner&&blockOf(b.id,owner);
@@ -1134,6 +1173,102 @@ function nextFreeY(p) {
  let y=40;for(const b of p.blocks)y=Math.max(y,b.y+b.height);for(const s of p.strokes)for(const pt of s.points)y=Math.max(y,pt[1]);
  return y+32;
 }
+// ---- copy / paste between pages and apps (clip.mjs) ----
+const isTyping=t=>t instanceof Element&&(['INPUT','TEXTAREA','SELECT'].includes(t.tagName)||t.isContentEditable);
+const isReading=()=>document.body.classList.contains('reading');
+function writeClip(e,clip) {
+ const {text,html}=encodeClip(clip);
+ e.clipboardData.setData('text/plain',text);e.clipboardData.setData('text/html',html);e.preventDefault();
+}
+// Copy the selected part of a text block with its formatting.
+function copyEditorText(e,ed,blockId,cut) {
+ if(e.defaultPrevented)return; // already filled (e.g. the text box's copy button)
+ const sel=getSelection();if(!sel||!sel.rangeCount||sel.isCollapsed)return;
+ const range=sel.getRangeAt(0);if(!ed.contains(range.commonAncestorContainer))return;
+ const box=document.createElement('div');box.append(range.cloneContents());
+ // cloneContents() leaves out the formatting of partly selected ancestors (<b>, <span style>), so wrap them back
+ let node=range.commonAncestorContainer;if(node.nodeType!==1)node=node.parentElement;
+ while(node&&node!==ed){const wrap=node.cloneNode(false);wrap.append(...box.childNodes);box.append(wrap);node=node.parentElement;}
+ const runs=domToRuns(box),text=runsToText(runs);if(!text)return;
+ const block=blockOf(blockId);
+ writeClip(e,makeClip({from:'yohaku-note',unit:W,texts:[{x:block?.x||0,y:block?.y||0,width:block?.width||600,height:block?.height||44,text,runs}]}));
+ if(cut&&!isReading())document.execCommand('delete');
+}
+// What Ctrl+C copies outside a text box: the selection (select tool), else the active block.
+function selectionClip() {
+ const p=page();let strokes=[],blocks=[];
+ if(tool==='select'&&!selectionEmpty()){strokes=p.strokes.filter(s=>selection.strokes.has(s));blocks=p.blocks.filter(b=>selection.blocks.has(b.id));}
+ else if(activeBlock&&blockOf(activeBlock))blocks=[blockOf(activeBlock)];
+ else return null;
+ return makeClip({from:'yohaku-note',unit:W,
+  texts:blocks.filter(b=>b.type==='text'&&b.text).map(b=>({x:b.x,y:b.y,width:b.width,height:b.height,text:b.text,runs:blockRuns(b)})),
+  images:blocks.filter(b=>b.type==='image').map(b=>({x:b.x,y:b.y,width:b.width,height:b.height,src:b.src,name:b.name})),
+  strokes:strokes.map(s=>({points:s.points,color:s.color,width:s.width,pressure:s.pressure}))});
+}
+function copyOut(e,cut) {
+ if(!ready||e.defaultPrevented||isTyping(e.target))return;
+ const sel=getSelection();if(sel&&!sel.isCollapsed&&sel.toString().trim())return; // ordinary text selection (sidebar etc.)
+ const clip=selectionClip();if(!clip)return;
+ writeClip(e,clip);
+ if(!cut||isReading())return;
+ if(tool==='select'&&!selectionEmpty())deleteSelection();else if(activeBlock)removeBlock(activeBlock);
+}
+document.addEventListener('copy',e=>copyOut(e,false));
+document.addEventListener('cut',e=>copyOut(e,true));
+// Insert the text of a clip at the caret of the focused text box, keeping bold / size / colour.
+function insertClipRuns(clip) {
+ const runs=[];
+ for(const t of [...clip.texts].sort((a,b)=>a.y-b.y||a.x-b.x)){if(runs.length)runs.push({text:'\n'});runs.push(...(t.runs||[{text:t.text}]));}
+ const tmp=document.createElement('div');runsToDom(tmp,normalizeRuns(runs));
+ if(tmp.lastChild?.nodeName==='BR'&&tmp.childNodes.length>1)tmp.lastChild.remove();
+ document.execCommand('insertHTML',false,tmp.innerHTML);
+}
+// Pasted things go below what is already on screen, else to the top of the visible part of the page.
+function pastePlace(p) {
+ const [vt,vb]=viewportRange(),free=nextFreeY(p);
+ return Math.min(free>vt&&free<vb-120?free:vt+48,MAX_HEIGHT-100);
+}
+function pasteText(text) {
+ if(isReading()){message('貼り付けるには「編集に戻る」を押してください。');return;}
+ const p=page(),before=snapshot(p),y=pastePlace(p);
+ const block=newTextBlock(64,y,text.slice(0,200000));block.height=44;
+ p.blocks=[...p.blocks,block];growPage(p,y+block.height+60);
+ commit(before,p);activeBlock=block.id;renderPage();
+}
+// Put a clip (from this app or 日記カレンダー) on the current page.
+function pasteClip(clip) {
+ if(isReading()){message('貼り付けるには「編集に戻る」を押してください。');return;}
+ const p=page();let layer=null;
+ if(clip.strokes.length){layer=editableLayer();if(!layer)return;}
+ // 座標の単位はどちらも元のページ幅 (余白ノート 1200 / 日記 1000)。右へ広げたページでも 1 単位の大きさは同じ
+ const k=W/clip.unit,w=clip.width*k,h=clip.height*k;
+ if(w>MAX_WIDTH){message('貼り付ける内容が大きすぎて、1ページに入りません。');return;}
+ if(h>MAX_HEIGHT-24){message('貼り付ける内容が大きすぎて、1ページに入りません。');return;}
+ // Same place as the original when it is on screen (shifted a little so the copy is visible), else the top of the screen
+ const [vt,vb]=viewportRange();let x=clip.origin.x*k,y=clip.origin.y*k;
+ if(y<vt||y+Math.min(h,200)>vb||clip.from!=='yohaku-note')y=pastePlace(p);else{x+=24;y+=24;}
+ // ページより幅の広い内容なら、ページを右へ広げる
+ if(w>pw(p))growPageWidth(p,w);
+ const PW=pw(p);
+ x=clamp(x,0,Math.max(0,PW-w));y=clamp(y,0,MAX_HEIGHT-h);
+ const placed=placeClip(clip,W,x,y);
+ const imageBytes=placed.images.reduce((n,im)=>n+im.src.length,0);
+ if(imageBytes){const total=doc.pages.reduce((n,pg)=>n+pg.blocks.reduce((m,b)=>m+(b.src?.length||0),0),0);if(total+imageBytes>60000000){message('試作品の画像容量の上限に達しました。');return;}}
+ const fit=b=>{const bx=clamp(b.x,0,PW-40),bw=clamp(b.width,40,PW-bx);return {x:bx,y:clamp(b.y,0,MAX_HEIGHT-24),width:bw};};
+ const blocks=[
+  ...placed.texts.map(t=>{const runs=t.runs?normalizeRuns(t.runs):null,text=(runs?runsToText(runs):t.text).slice(0,200000);return {id:crypto.randomUUID(),type:'text',...fit(t),height:Math.max(24,Math.round(t.height)),text,...(runs&&runs.length?{runs}:{})};}),
+  ...placed.images.map(im=>{const f=fit(im);return {id:crypto.randomUUID(),type:'image',...f,height:Math.max(24,Math.round(f.width*im.height/im.width)),src:im.src,name:im.name};}),
+ ].map(b=>({...b,y:Math.min(b.y,MAX_HEIGHT-b.height)}));
+ const strokes=placed.strokes.map(s=>({color:s.color,width:clamp(Math.round(s.width*10)/10,1,100),pressure:s.pressure,points:s.points.map(pt=>[clamp(pt[0],0,PW),clamp(pt[1],0,MAX_HEIGHT),pt[2]]),layer:layer.id}));
+ const before=snapshot(p);
+ p.blocks=[...p.blocks,...blocks];p.strokes=[...p.strokes,...strokes];
+ growPage(p,Math.max(y+h,...blocks.map(b=>b.y+b.height))+80);
+ commit(before,p);
+ if(tool==='select'){selection={strokes:new Set(strokes),blocks:new Set(blocks.map(b=>b.id))};selectionLasso=null;}
+ else if(blocks.length)activeBlock=blocks.at(-1).id;
+ renderPage();redraw();renderSelection();
+ if(clip.from==='nikki-calendar')message('日記カレンダーから貼り付けました。');
+}
 // ---- images ----
 async function prepareImage(file) {
  if(!/^image\/(png|jpeg|webp)$/.test(file.type))throw new Error('PNG・JPEG・WebP の画像を選んでください。');
@@ -1169,8 +1304,18 @@ async function insertImages(files,point) {
 $('add-image').onclick=()=>{$('image-file').value='';$('image-file').click();};
 $('image-file').onchange=e=>{const files=[...e.target.files];if(files.length)insertImages(files,null);};
 document.addEventListener('paste',e=>{
- if(!ready)return;const files=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
- if(!files.length)return;e.preventDefault();insertImages(files,null);
+ if(!ready||e.defaultPrevented)return;const files=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
+ if(!files.length){
+  if(isTyping(e.target))return;
+  // 余白ノート・日記カレンダーのクリップ、または普通の文章(新しい入力欄にする)
+  const clip=decodeClip(e.clipboardData?.getData('text/html'));
+  if(clip){e.preventDefault();pasteClip(clip);return;}
+  const t=e.clipboardData?.getData('text/plain')||'';
+  if(t.trim()){e.preventDefault();pasteText(t);}
+  return;
+ }
+ e.preventDefault();
+ insertImages(files,null);
 });
 window.addEventListener('dragover',e=>e.preventDefault());
 window.addEventListener('drop',e=>{
@@ -1210,14 +1355,16 @@ sheet.addEventListener('pointerdown',e=>{
   const point=coordinates(e),additive=e.shiftKey;sheet.focus({preventScroll:true});
   if(blockEl){
    e.preventDefault();const id=blockEl.dataset.id;
-   if(!selection.blocks.has(id)){if(!additive)selection={strokes:new Set(),blocks:new Set()};selection.blocks.add(id);selectionLasso=null;}
+   if(!selection.blocks.has(id)){if(!additive){settleLasso();selection={strokes:new Set(),blocks:new Set()};}selection.blocks.add(id);selectionLasso=null;}
    renderSelection();startDrag(e,point);return;
   }
   if(insideSelection(point[0],point[1])){e.preventDefault();startDrag(e,point);return;}
   if(e.pointerType==='touch')return;
   e.preventDefault();
-  // 四角モードだけ、線の上で押したらその線をつかむ。投げ縄は線の上から囲み始めてよい。
-  const hit=selectMode==='lasso'?null:strokeAt(point[0],point[1]);
+  // 選択の外を押した: 投げ縄の仮の切り分けを元に戻してから始める
+  if(!additive)settleLasso();
+  // 線の上で押したら(四角でも投げ縄でも)その線をまるごとつかむ。投げ縄は何もない所から囲み始める
+  const hit=strokeAt(point[0],point[1]);
   if(hit){if(!additive)selection={strokes:new Set(),blocks:new Set()};selection.strokes.add(hit);selectionLasso=null;renderSelection();startDrag(e,point);return;}
   if(!additive)clearSelection();else selectionLasso=null;
   // no enclosing mode chosen: dragging on empty paper encloses with a rectangle (same as 四角で囲む)
@@ -1298,7 +1445,8 @@ function finish() {
   if(completed.pageId!==doc.activeId)return;
   const xs=completed.points.map(q=>q[0]),ys=completed.points.map(q=>q[1]);
   const span=Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys));
-  if(completed.points.length>=3&&span>4){applyLasso(completed.points,completed.additive);selectionLasso=selectionEmpty()?null:completed.points.map(q=>[q[0],q[1]]);}
+  // 細すぎる(ほとんど囲めていない)投げ縄はクリックとして扱い、線を切らない
+  if(completed.points.length>=3&&span>4&&polygonArea(completed.points)*scale*scale>=400){applyLasso(completed.points,completed.additive);selectionLasso=selectionEmpty()?null:completed.points.map(q=>[q[0],q[1]]);}
   else{const hit=strokeAt(completed.points[0][0],completed.points[0][1]);if(hit){if(!completed.additive)selection={strokes:new Set(),blocks:new Set()};selection.strokes.add(hit);selectionLasso=null;}}
   renderSelection();return;
  }
@@ -1401,7 +1549,7 @@ sheet.addEventListener('click',e=>{
 // ---- undo / redo ----
 function undo(redo=false) {
  if(document.body.classList.contains('reading'))return;
- finish();const h=historyFor(doc.activeId),from=redo?h.redo:h.undo,to=redo?h.undo:h.redo;if(!from.length)return;
+ finish();pendingLasso=null;const h=historyFor(doc.activeId),from=redo?h.redo:h.undo,to=redo?h.undo:h.redo;if(!from.length)return;
  if(document.activeElement&&sheet.contains(document.activeElement))document.activeElement.blur();
  const p=page();to.push(snapshot(p));restore(p,from.pop());editing=null;selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;
  if(activeBlock&&!blockOf(activeBlock,p))activeBlock=null;
@@ -1422,7 +1570,7 @@ document.addEventListener('keydown',e=>{
   if(arrows[e.key]){e.preventDefault();nudgeSelection(...arrows[e.key]);return;}
   if((e.key==='Delete'||e.key==='Backspace')&&!selectionEmpty()){e.preventDefault();deleteSelection();return;}
   if(e.key==='Escape'){clearSelection();return;}
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();const p=page(),L=editableLayer(true);selection={strokes:new Set(p.strokes.filter(s=>L&&s.layer===L.id)),blocks:new Set(p.blocks.map(b=>b.id))};selectionLasso=null;renderSelection();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();settleLasso();const p=page(),L=editableLayer(true);selection={strokes:new Set(p.strokes.filter(s=>L&&s.layer===L.id)),blocks:new Set(p.blocks.map(b=>b.id))};selectionLasso=null;renderSelection();return;}
  }
  if((e.key==='Delete'||e.key==='Backspace')&&activeBlock){e.preventDefault();removeBlock(activeBlock);}
  if(e.key==='Escape'&&activeBlock)setActive(null);
@@ -1580,7 +1728,7 @@ window.addEventListener('resize',()=>{if(layerPanel.style.left)placePanel(parseF
 const hints={text:'クリックした場所に文字を入力できます。ペンで触れると手書きになります',pen:'ペンやマウスでドラッグして書きます。文字や画像の上にも書けます',
  part:'なぞった部分だけ消します。「大きさ」で消しゴムの太さを変えられます',whole:'触れた線を一本ごと消します。「大きさ」で消しゴムの太さを変えられます',
  rect:'四角で囲んで選択（触れた線はまるごと）。文字や画像はクリックで選択。ドラッグや矢印キーで移動できます',
- lasso:'ペンやマウスで自由に囲むと、囲んだ部分だけが切り出されて選ばれます（線の上から囲み始めても大丈夫）。囲み終わったら枠の中をドラッグして移動'};
+ lasso:'何もない所から自由に囲むと、囲んだ部分だけが切り出されて選ばれます（線の上を押すとその線をまるごと選択）。枠の中をドラッグして移動。何もせずに選択をやめると元の線に戻ります'};
 hints.pick='線や枠を押すと選べます（ドラッグで移動）。空いている所をドラッグすると四角で囲んで選べます。自由な形で囲むときは「投げ縄」';hints.select=hints.pick;
 function chooseTool(value) {
  finish();tool=value;

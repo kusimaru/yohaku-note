@@ -969,11 +969,18 @@ function setActive(id) {
  activeBlock=id;
  for(const el of blocksLayer.children)el.classList.toggle('active',el.dataset.id===id);
 }
+// A text box grows to the right while its longest line is longer than the box. When it reaches the right
+// edge of the page, the page itself grows to the right (as it does for handwriting), up to MAX_WIDTH.
 function autowiden(el,block) {
  const ed=el.querySelector('.editor');if(!ed||!block)return;
- const max=pw(page())-block.x-24;if(block.width>=max)return;
- const prev=ed.style.whiteSpace;ed.style.whiteSpace='pre';const need=Math.ceil(ed.scrollWidth)+4;ed.style.whiteSpace=prev;
- if(need>block.width){const w=Math.min(max,need);updateBlock(page(),block.id,{width:w});el.style.width=w+'px';}
+ const p=page(),max=MAX_WIDTH-block.x-24;if(block.width>=max)return;
+ // natural width of the content (scrollWidth would never be less than the box itself, so the box would creep wider)
+ const pw0=ed.style.width,ws0=ed.style.whiteSpace;ed.style.whiteSpace='pre';ed.style.width='max-content';const need=Math.ceil(ed.offsetWidth)+2;ed.style.width=pw0;ed.style.whiteSpace=ws0;
+ if(need>block.width){
+  const w=Math.min(max,need);
+  if(block.x+w+24>pw(p))growPageWidth(p,block.x+w+24);
+  updateBlock(p,block.id,{width:w});el.style.width=w+'px';
+ }
 }
 function autosize(el,block) {
  const ed=el.querySelector('.editor');if(!ed)return;
@@ -1271,7 +1278,8 @@ sheet.addEventListener('pointermove',e=>{
   if(nx===b.x&&ny===b.y)return;
   updateBlock(p,b.id,{x:nx,y:ny});growPage(p,ny+b.height+60);
  } else if(b.type==='text'){
-  const nw=Math.round(clamp(o.width+dx,120,pw(page())-b.x));if(nw===b.width)return;
+  const nw=Math.round(clamp(o.width+dx,120,MAX_WIDTH-b.x-24));if(nw===b.width)return;
+  if(b.x+nw+24>pw(p))growPageWidth(p,b.x+nw+24); // dragging past the page edge widens the page
   updateBlock(p,b.id,{width:nw});
  } else {
   const nw=Math.round(clamp(o.width+dx,40,pw(page())-b.x)),nh=Math.max(24,Math.round(nw*o.height/o.width));

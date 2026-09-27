@@ -912,3 +912,9 @@ body .toolbar-context .presets{flex:1 1 auto;min-width:0}
 /* palm guard: one finger (or a resting little finger) never scrolls the paper; two fingers pan/zoom via the app */
 body.palm-guard .paper-viewport,body.palm-guard .sheet,body.palm-guard .sheet.ink,body.palm-guard .sheet.select,body.palm-guard.ios .sheet.ink,body.palm-guard.ios .sheet.select{touch-action:none}
 body.palm-guard.reading .paper-viewport,body.palm-guard.reading .sheet{touch-action:pan-x pan-y}
+
+/* size buttons after the base moved to 48px */
+.sizes .fmt-size[data-size="32"]{font-size:11px;font-weight:400}
+.sizes .fmt-size[data-size="48"]{font-size:13px;font-weight:400}
+.sizes .fmt-size[data-size="64"]{font-size:14px;font-weight:600}
+.sizes .fmt-size[data-size="80"]{font-size:16px;font-weight:700}

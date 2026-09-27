@@ -3,9 +3,9 @@ export const PAGE_WIDTH=1200, PAGE_HEIGHT=760, MAX_HEIGHT=6000, MAX_WIDTH=4800;
 export const pageWidth=p=>Number.isFinite(p?.width)&&p.width>PAGE_WIDTH?Math.min(MAX_WIDTH,p.width):PAGE_WIDTH;
 // ---- rich text runs ----
 // A text block stores plain `text` and optional `runs`: [{text,bold?,size?,color?}|{hr:true}].
-export const DEFAULT_TEXT_COLOR='#2b3f38',MIN_FONT=8,MAX_FONT=72;
+export const DEFAULT_TEXT_COLOR='#2b3f38',MIN_FONT=8,MAX_FONT=120;
 // base font size of a text box: new boxes carry fontSize 28; boxes made before this have none and stay at 15
-export const MAX_INK_WIDTH=100,TEXT_BASE=28,LEGACY_TEXT_BASE=15;
+export const MAX_INK_WIDTH=100,TEXT_BASE=48,LEGACY_TEXT_BASE=15;
 export const blockFontSize=b=>Number.isInteger(b?.fontSize)&&b.fontSize>=MIN_FONT&&b.fontSize<=MAX_FONT?b.fontSize:LEGACY_TEXT_BASE;
 const sameFormat=(a,b)=>!!a.bold===!!b.bold&&(a.size||0)===(b.size||0)&&(a.color||'')===(b.color||'');
 export function normalizeRuns(runs) {

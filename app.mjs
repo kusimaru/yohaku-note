@@ -969,6 +969,12 @@ function setActive(id) {
  activeBlock=id;
  for(const el of blocksLayer.children)el.classList.toggle('active',el.dataset.id===id);
 }
+function autowiden(el,block) {
+ const ed=el.querySelector('.editor');if(!ed||!block)return;
+ const max=pw(page())-block.x-24;if(block.width>=max)return;
+ const prev=ed.style.whiteSpace;ed.style.whiteSpace='pre';const need=Math.ceil(ed.scrollWidth)+4;ed.style.whiteSpace=prev;
+ if(need>block.width){const w=Math.min(max,need);updateBlock(page(),block.id,{width:w});el.style.width=w+'px';}
+}
 function autosize(el,block) {
  const ed=el.querySelector('.editor');if(!ed)return;
  const h=clamp(Math.ceil(ed.offsetHeight)+2,40,MAX_HEIGHT-block.y);
@@ -1032,7 +1038,7 @@ function renderBlocks() {
      const cur=blockOf(b.id);if(!cur)return;
      const runs=domToRuns(ed),text=runsToText(runs);
      if(text.length>200000){message('文字数が上限（20万字）に達しました。');runsToDom(ed,blockRuns(cur));return;}
-     lastRuns.set(ed,JSON.stringify(runs));updateBlock(page(),b.id,{text,runs});ed.dataset.empty=String(!text);autosize(el,blockOf(b.id));
+     lastRuns.set(ed,JSON.stringify(runs));updateBlock(page(),b.id,{text,runs});ed.dataset.empty=String(!text);autowiden(el,blockOf(b.id));autosize(el,blockOf(b.id));
      if(editing&&editing.id===b.id&&!editing.committed){editing.committed=true;commit(editing.before);}else changed();
      updateHint();
     });
@@ -1112,7 +1118,7 @@ document.addEventListener('focusout',e=>{
 function createTextBlock(x,y) {
  const p=page(),before=snapshot(p);
  const bx=clamp(Math.round(x)-12,0,pw(page())-240),by=clamp(Math.round(y)-14,0,MAX_HEIGHT-60);
- const block=newTextBlock(bx,by,'');block.width=Math.min(640,pw(page())-bx-24);block.height=44;
+ const block=newTextBlock(bx,by,'');block.width=Math.min(760,pw(page())-bx-24);block.height=72;
  p.blocks=[...p.blocks,block];growPage(p,by+block.height+60);
  commit(before);activeBlock=block.id;renderPage();
  blocksLayer.querySelector('[data-id="'+block.id+'"] .editor')?.focus();
@@ -1432,14 +1438,28 @@ function applySize(px) {
  const ed=currentEditor();if(!ed)return;ensureSelection(ed);
  document.execCommand('styleWithCSS',false,'false');document.execCommand('fontSize',false,'7');
  const spans=[];
- for(const f of ed.querySelectorAll('font[size="7"]')){const span=document.createElement('span');span.style.fontSize=clamp(Math.round(px),MIN_FONT,MAX_FONT)+'px';while(f.firstChild)span.append(f.firstChild);f.replaceWith(span);spans.push(span);}
- if(spans.length){const r=document.createRange();r.setStartBefore(spans[0]);r.setEndAfter(spans.at(-1));const sel=getSelection();sel.removeAllRanges();sel.addRange(r);}
+ for(const f of ed.querySelectorAll('font[size="7"]')){
+  const span=document.createElement('span');span.style.fontSize=clamp(Math.round(px),MIN_FONT,MAX_FONT)+'px';while(f.firstChild)span.append(f.firstChild);f.replaceWith(span);spans.push(span);
+  for(const inner of span.querySelectorAll('[style]'))inner.style.fontSize=''; // an older size inside would win over the new one
+ }
+ // keep the selection inside the new spans, so the next A-/A+ reads the new size
+ if(spans.length){const r=document.createRange();const first=spans[0],last=spans.at(-1);r.setStart(first,0);r.setEnd(last,last.childNodes.length);const sel=getSelection();sel.removeAllRanges();sel.addRange(r);}
  notifyInput(ed);
 }
+// Size of the first character inside the selection (not of the element the selection starts in: after
+// "select all" that is the editor itself, whose base size says nothing about already enlarged text).
 function selectionFontSize(ed) {
- const sel=getSelection();let node=sel.rangeCount?sel.anchorNode:ed;if(node&&node.nodeType===3)node=node.parentElement;
- if(!node||!ed.contains(node))node=ed;
- return Math.round(parseFloat(getComputedStyle(node).fontSize))||blockFontSize(blockOf(ed.closest('.block')?.dataset.id));
+ const sel=getSelection();let node=null;
+ if(sel.rangeCount){
+  const r=sel.getRangeAt(0);
+  if(r.startContainer.nodeType===3&&r.startOffset<r.startContainer.length)node=r.startContainer;
+  else{
+   const w=document.createTreeWalker(r.commonAncestorContainer.nodeType===3?r.commonAncestorContainer.parentNode:r.commonAncestorContainer,NodeFilter.SHOW_TEXT);
+   for(let t=w.nextNode();t;t=w.nextNode())if(t.data.trim()&&r.intersectsNode(t)){node=t;break;}
+  }
+ }
+ let el=node?node.parentElement:ed;if(!el||!ed.contains(el))el=ed;
+ return Math.round(parseFloat(getComputedStyle(el).fontSize))||blockFontSize(blockOf(ed.closest('.block')?.dataset.id));
 }
 function insertRule() {
  const ed=currentEditor();if(!ed)return;
@@ -1451,8 +1471,8 @@ function insertRule() {
 for(const el of document.querySelectorAll('.text-tools button'))el.addEventListener('mousedown',e=>e.preventDefault());
 $('fmt-bold').onclick=applyBold;
 $('fmt-hr').onclick=insertRule;
-$('fmt-smaller').onclick=()=>{const ed=currentEditor();if(ed)applySize(selectionFontSize(ed)-4);};
-$('fmt-larger').onclick=()=>{const ed=currentEditor();if(ed)applySize(selectionFontSize(ed)+4);};
+$('fmt-smaller').onclick=()=>{const ed=currentEditor();if(!ed)return;ensureSelection(ed);applySize(selectionFontSize(ed)-6);};
+$('fmt-larger').onclick=()=>{const ed=currentEditor();if(!ed)return;ensureSelection(ed);applySize(selectionFontSize(ed)+6);};
 document.querySelectorAll('.fmt-size').forEach(b=>b.onclick=()=>applySize(Number(b.dataset.size)));
 document.querySelectorAll('.fmt-color').forEach(b=>b.onclick=()=>applyColor(b.dataset.color));
 $('fmt-color-clear').onclick=()=>applyColor(DEFAULT_TEXT_COLOR);

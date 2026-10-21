@@ -2,6 +2,7 @@ import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTe
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
+import { PROVIDERS, chat as aiChat, listModels as aiListModels, buildContext, pageText, SYSTEM_PROMPT, userTurn, defaultSettings as aiDefaults } from './ai.mjs';
 import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS, APPLE, defaultMime, blobToWav, getMediaDir, setMediaDir, folderSupported, folderPermission, writeToFolder } from './media.mjs';
 import { makeClip, encodeClip, decodeClip, placeClip } from './clip.mjs';
 import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
@@ -459,6 +460,120 @@ async function transcribeBlock(blockId,statusEl){
   statusEl.textContent='文字起こしを下に貼り付けました（'+text.length+' 字）';message('文字起こしを貼り付けました。');
  }catch(e){statusEl.classList.add('error');statusEl.textContent='文字起こしに失敗：'+(e.message||e);}
 }
+// ---- AI assistant: search the notes on this device, answer with a chosen model ----
+const AI_STORE='yohaku-ai';
+function aiSettings(){
+ const d=aiDefaults();let s=null;try{s=JSON.parse(localStorage.getItem(AI_STORE)||'null');}catch{}
+ const out={...d,...(s||{})};for(const k of Object.keys(PROVIDERS))out[k]={...d[k],...((s||{})[k]||{})};
+ if(!out.openai.key){try{out.openai.key=localStorage.getItem('yohaku-transcribe-key')||'';}catch{}} // the key set up for transcription works here too
+ if(!PROVIDERS[out.provider])out.provider='anthropic';
+ return out;
+}
+function saveAiSettings(v){try{localStorage.setItem(AI_STORE,JSON.stringify(v));}catch{}}
+let aiHistory=[],aiAbort=null;
+const aiPanel=$('ai-panel');document.body.append(aiPanel,$('ai-dialog'));
+function aiModelLabel(){const st=aiSettings(),cfg=st[st.provider];const lab=$('ai-model-label');lab.textContent=(PROVIDERS[st.provider].label.replace(/（.*）/,''))+'・'+(cfg.model||'モデル未設定');lab.classList.toggle('cloud',PROVIDERS[st.provider].cloud);lab.title=PROVIDERS[st.provider].cloud?'質問とノートの抜粋はこのクラウドに送られます':'この PC の中で動くモデルです';}
+function setAiPanel(open){aiPanel.hidden=!open;$('ai-toggle').setAttribute('aria-expanded',String(open));if(open){aiModelLabel();setTimeout(()=>$('ai-input').focus({preventScroll:true}),0);}}
+$('ai-toggle').onclick=()=>setAiPanel(aiPanel.hidden);
+$('ai-close').onclick=()=>setAiPanel(false);
+$('ai-new').onclick=()=>{aiHistory=[];$('ai-log').replaceChildren(el('p','ai-empty','新しい会話です。ノートについて質問してください。'));$('ai-input').focus();};
+function aiDocs(scope){
+ const cur=page(),sec=sectionOf(doc,cur?.sectionId),nb=sec?notebookOf(doc,sec.notebookId):null;
+ return doc.pages.filter(pg=>{
+  if(scope==='page')return pg.id===cur?.id;
+  if(scope==='section')return pg.sectionId===cur?.sectionId;
+  if(scope==='notebook')return sectionOf(doc,pg.sectionId)?.notebookId===nb?.id;
+  return true;
+ }).map(pg=>{const s2=sectionOf(doc,pg.sectionId),n2=s2?notebookOf(doc,s2.notebookId):null;return {id:pg.id,title:pg.title||'名称未設定',where:[n2?.name,s2?.name].filter(Boolean).join(' › '),updatedAt:pg.updatedAt,text:pageText(pg)};}).filter(d=>d.text);
+}
+const scopeLabel=v=>({all:'すべてのノート',notebook:'このノートブック',section:'このセクション',page:'このページ'})[v]||'すべてのノート';
+function renderAnswer(box,text,sources){
+ const t=box.querySelector('.ai-text');t.replaceChildren();
+ const byN=new Map(sources.map(x=>[x.n,x]));
+ for(const part of text.split(/(\[\d+\])/)){
+  const m=part.match(/^\[(\d+)\]$/);const src=m&&byN.get(Number(m[1]));
+  if(src){const b=el('button','ai-ref','['+src.n+']');b.type='button';b.title='「'+src.title+'」を開く';b.onclick=()=>aiOpenSource(src.id);t.append(b);}
+  else t.append(document.createTextNode(part));
+ }
+}
+function aiOpenSource(id){if(!pageById(id)){message('そのページは見つかりません（削除されたかもしれません）。');return;}openPage(id);if(matchMedia('(max-width:700px)').matches)setAiPanel(false);}
+async function askAi(question){
+ question=question.trim();if(!question||aiAbort)return;
+ const st=aiSettings(),prov=PROVIDERS[st.provider],scope=$('ai-scope').value;
+ const log=$('ai-log');log.querySelector('.ai-empty')?.remove();
+ log.append(el('div','ai-q',question));
+ const box=el('div','ai-a thinking');box.append(el('div','ai-text','ノートを探しています…'));log.append(box);log.scrollTop=log.scrollHeight;
+ const docs=aiDocs(scope);
+ const ctx=buildContext(docs,question,{budget:prov.budget});
+ const messages=[...aiHistory.slice(-6),{role:'user',content:userTurn(question,ctx,scopeLabel(scope))}];
+ let text='';aiAbort=new AbortController();$('ai-send').hidden=true;$('ai-stop').hidden=false;
+ box.querySelector('.ai-text').textContent='';
+ try{
+  text=await aiChat(st,{system:SYSTEM_PROMPT,messages,signal:aiAbort.signal,onText:d=>{text+=d;box.querySelector('.ai-text').textContent=text;log.scrollTop=log.scrollHeight;}});
+  box.classList.remove('thinking');renderAnswer(box,text||'（答えが空でした）',ctx.sources);
+  aiHistory.push({role:'user',content:question},{role:'assistant',content:text});
+  if(ctx.sources.length){const list=el('div','ai-sources');for(const src of ctx.sources){const b=el('button','','['+src.n+'] '+src.title+(src.where?'（'+src.where+'）':''));b.type='button';b.title='このページを開く';b.onclick=()=>aiOpenSource(src.id);list.append(b);}box.append(list);}
+  const tools=el('div','ai-tools'),put=el('button','',''),cp=el('button','','');put.type='button';cp.type='button';put.append(icon('page'),'ページに貼り付け');cp.append(icon('copy'),'コピー');
+  put.onclick=()=>aiInsert(text);cp.onclick=async()=>{try{await navigator.clipboard.writeText(text);message('答えをコピーしました。');}catch{message('コピーできませんでした。');}};
+  tools.append(put,cp);box.append(tools);
+ }catch(e){
+  box.classList.remove('thinking');box.classList.add('error');
+  const aborted=e.name==='AbortError';const t=box.querySelector('.ai-text');
+  t.textContent=aborted?(text?text+'\n（途中で止めました）':'止めました。'):'答えを受け取れませんでした：'+(e.message||e)+(st.provider==='ollama'||st.provider==='compat'?'\n\nローカルLLMの場合は、サーバーが起動しているか、AI の設定の説明どおりに接続を許可しているかを確認してください。':'');
+  if(!aborted&&/API キー|モデル名/.test(e.message||''))openAiSettings();
+ }finally{aiAbort=null;$('ai-send').hidden=false;$('ai-stop').hidden=true;log.scrollTop=log.scrollHeight;}
+}
+function aiInsert(text){
+ if(!ready||!text)return;const p=page(),before=snapshot(p);
+ const y=nextFreeY(p);if(y+80>MAX_HEIGHT){message('ページの下端に空きがありません。');return;}
+ const tb=newTextBlock(64,y,text);tb.width=Math.min(1000,pw(p)-64-24);
+ p.blocks=[...p.blocks,tb];growPage(p,y+Math.min(3000,120+text.length));commit(before,p);activeBlock=tb.id;renderPage();
+ message('AI の答えをページの下に貼り付けました。');
+}
+$('ai-form').addEventListener('submit',e=>{e.preventDefault();const v=$('ai-input').value;$('ai-input').value='';askAi(v);});
+$('ai-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){e.preventDefault();$('ai-form').requestSubmit();}});
+$('ai-stop').onclick=()=>aiAbort?.abort();
+// -- settings dialog --
+const AI_HELP={
+ anthropic:'Claude を使います。<a href="https://console.anthropic.com/" target="_blank" rel="noopener">Anthropic のコンソール</a>で API キーを作って入れてください（有料・使った分だけ）。質問と、探したノートの抜粋が Anthropic に送られます。',
+ openai:'OpenAI のモデルを使います。API キーは文字起こし用に入れたものがあれば、そのまま使えます（有料）。質問と、探したノートの抜粋が OpenAI に送られます。',
+ ollama:'この PC で動く <b>Ollama</b> を使います。ノートは PC の外に出ません。<br>1. <a href="https://ollama.com/" target="_blank" rel="noopener">ollama.com</a> から入れ、モデルを取得します（例：<code>ollama pull qwen3:8b</code>）。<br>2. このサイトからの接続を許可するため、Windows の環境変数 <code>OLLAMA_ORIGINS</code> に <code>https://kusimaru.github.io</code> を設定し、Ollama を起動し直します。<br>3. 初回は Edge が「ローカル ネットワークへのアクセス」の許可を求めるので「許可」を押します。<br>iPad からは使えません（iPad の中では動かないため）。',
+ compat:'LM Studio など、OpenAI 互換の API を持つサーバーを使います。LM Studio なら「Developer」タブでサーバーを起動し、「Enable CORS」をオンにします。接続先は通常 <code>http://localhost:1234/v1</code> です。',
+};
+let aiDialogProv=null; // the provider whose fields the dialog is showing
+let aiDialogDraft=null; // unsaved edits while switching providers in the dialog
+function fillAiDialog(st,prov){
+ aiDialogProv=prov;
+ const sel=$('ai-provider');if(!sel.options.length)for(const [k,v] of Object.entries(PROVIDERS)){const o=document.createElement('option');o.value=k;o.textContent=v.label;sel.append(o);}
+ sel.value=prov;const cfg=st[prov],P=PROVIDERS[prov];
+ $('ai-provider-help').innerHTML=AI_HELP[prov];
+ $('ai-endpoint-row').hidden=P.cloud;$('ai-endpoint').value=cfg.endpoint||P.endpoint;
+ $('ai-key-row').hidden=!(P.needsKey||prov==='compat');$('ai-key').value=cfg.key||'';$('ai-key').placeholder=prov==='compat'?'必要なときだけ（この端末にだけ保存）':'この端末にだけ保存されます';
+ $('ai-model').value=cfg.model||'';const dl=$('ai-models');dl.replaceChildren();for(const m of P.models){const o=document.createElement('option');o.value=m;dl.append(o);}
+ $('ai-list-models').hidden=P.cloud&&prov==='anthropic';$('ai-test-result').textContent='';
+}
+function readAiDialog(){
+ const st=aiDialogDraft||aiSettings(),prov=aiDialogProv||$('ai-provider').value,P=PROVIDERS[prov];st.provider=prov;
+ st[prov]={...st[prov],model:$('ai-model').value.trim(),key:$('ai-key').value.trim()};if(!P.cloud)st[prov].endpoint=$('ai-endpoint').value.trim()||P.endpoint;
+ return st;
+}
+function openAiSettings(){const st=aiSettings();aiDialogDraft=null;fillAiDialog(st,st.provider);if(!$('ai-dialog').open)$('ai-dialog').showModal();}
+$('ai-settings-open').onclick=openAiSettings;
+$('ai-provider').onchange=()=>{aiDialogDraft=readAiDialog();const next=$('ai-provider').value;aiDialogDraft.provider=next;fillAiDialog(aiDialogDraft,next);}; // keep the fields of the provider being left in the draft
+$('ai-dialog-close').onclick=()=>{aiDialogDraft=null;$('ai-dialog').close();};
+$('ai-dialog').querySelector('form').addEventListener('submit',()=>{const st=readAiDialog();aiDialogDraft=null;saveAiSettings(st);aiModelLabel();message('AI の設定を保存しました：'+PROVIDERS[st.provider].label+'・'+(st[st.provider].model||'モデル未設定'));});
+$('ai-list-models').onclick=async()=>{
+ const st=readAiDialog(),out=$('ai-test-result');out.textContent='モデル一覧を取得しています…';
+ try{const list=await aiListModels(st);const dl=$('ai-models');dl.replaceChildren();for(const m of list){const o=document.createElement('option');o.value=m;dl.append(o);}
+  out.textContent=list.length?list.length+' 個のモデルが見つかりました：'+list.slice(0,8).join('、')+(list.length>8?' ほか':''):'モデルが見つかりません。先にモデルを取得してください。';
+  if(list.length&&!$('ai-model').value)$('ai-model').value=list[0];}
+ catch(e){out.textContent='取得できませんでした：'+(e.message||e)+(e.name==='TypeError'?'（接続できません。サーバーの起動と、接続の許可を確認してください）':'');}
+};
+$('ai-test').onclick=async()=>{
+ const st=readAiDialog(),out=$('ai-test-result');out.textContent='接続を試しています…';
+ try{const t=await aiChat(st,{system:'短く答えてください。',messages:[{role:'user',content:'「接続できました」とだけ返してください。'}]});out.textContent='接続できました。返事：'+t.trim().slice(0,60);}
+ catch(e){out.textContent='接続できませんでした：'+(e.message||e)+(e.name==='TypeError'?'（ネットワークか、接続の許可を確認してください）':'');}
+};
 // ---- multi-select ----
 const selMark=()=>{const m=el('i','sel-mark');m.append(icon('check'));return m;};
 const isSelected=(kind,id)=>multi.kind===kind&&multi.ids.has(id);

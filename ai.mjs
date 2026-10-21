@@ -80,8 +80,17 @@ export const PROVIDERS={
  anthropic:{label:'Claude（Anthropic・クラウド）',cloud:true,needsKey:true,endpoint:'https://api.anthropic.com',models:['claude-opus-5-5','claude-sonnet-5-5','claude-haiku-5-5'],budget:40000},
  openai:{label:'OpenAI（クラウド）',cloud:true,needsKey:true,endpoint:'https://api.openai.com/v1',models:['gpt-5-mini','gpt-5','gpt-5-nano'],budget:40000},
  ollama:{label:'Ollama（この PC のローカルLLM）',cloud:false,needsKey:false,endpoint:'http://localhost:11434',models:['qwen3:8b','gemma3:12b','llama3.1:8b'],budget:9000},
- compat:{label:'OpenAI 互換サーバー（LM Studio など）',cloud:false,needsKey:false,endpoint:'http://localhost:1234/v1',models:[],budget:9000},
+ compat:{label:'LM Studio（この PC のローカルLLM・OpenAI 互換）',cloud:false,needsKey:false,endpoint:'http://localhost:1234/v1',models:[],budget:9000},
+ // Subscriptions (Claude Pro/Max, ChatGPT Plus/Pro) have no API for other apps: the app copies the question with the
+ // note excerpts, opens the chat site, and the user pastes; the answer is pasted back to keep it with its sources.
+ 'claude-web':{label:'Claude（契約中のサブスクで・コピーして開く）',cloud:true,manual:true,site:'https://claude.ai/new',siteName:'Claude',models:[],budget:40000},
+ 'chatgpt-web':{label:'ChatGPT（契約中のサブスクで・コピーして開く）',cloud:true,manual:true,site:'https://chatgpt.com/',siteName:'ChatGPT',models:[],budget:40000},
 };
+// One self-contained message for a chat site: the instructions, the earlier turns, the excerpts and the question.
+export function manualPrompt(history,question,context,scopeLabel){
+ const earlier=history.length?'【これまでのやり取り】\n'+history.map(m=>(m.role==='user'?'質問：':'答え：')+m.content).join('\n')+'\n\n':'';
+ return SYSTEM_PROMPT+'\n\n'+earlier+userTurn(question,context,scopeLabel);
+}
 // Anthropic models that accept the server-side refusal fallback in its "default" form.
 const FALLBACK_MODELS=new Set(['claude-opus-5-5','claude-sonnet-5-5','claude-opus-5','claude-fable-5-1']);
 
@@ -107,6 +116,7 @@ async function failure(res,provider){
 // messages: [{role:'user'|'assistant', content:string}]; onText(delta) is called as text streams in.
 export async function chat(settings,{system,messages,onText=()=>{},signal,fetchImpl=(...a)=>fetch(...a)}){
  const p=settings.provider,cfg=settings[p]||{},model=(cfg.model||PROVIDERS[p].models[0]||'').trim();
+ if(PROVIDERS[p].manual)throw new Error('この方式は「コピーして開く」で使います。');
  const base=String(cfg.endpoint||PROVIDERS[p].endpoint).replace(/\/+$/,'');
  if(!model)throw new Error('モデル名を設定してください。');
  if(PROVIDERS[p].needsKey&&!cfg.key)throw new Error('API キーを設定してください。');
@@ -148,4 +158,4 @@ export async function listModels(settings,{fetchImpl=(...a)=>fetch(...a)}={}){
  if(p==='compat'||p==='openai'){const h={};if(cfg.key)h.authorization='Bearer '+cfg.key;const r=await fetchImpl(base+'/models',{headers:h});if(!r.ok)throw await failure(r,p);const j=await r.json();return (j.data||[]).map(m=>m.id).filter(Boolean);}
  return PROVIDERS[p].models.slice();
 }
-export function defaultSettings(){return {provider:'anthropic',anthropic:{model:'claude-opus-5-5',key:''},openai:{model:'gpt-5-mini',key:''},ollama:{model:'',endpoint:PROVIDERS.ollama.endpoint},compat:{model:'',endpoint:PROVIDERS.compat.endpoint,key:''}};}
+export function defaultSettings(){return {provider:'anthropic',anthropic:{model:'claude-opus-5-5',key:''},openai:{model:'gpt-5-mini',key:''},ollama:{model:'',endpoint:PROVIDERS.ollama.endpoint},compat:{model:'',endpoint:PROVIDERS.compat.endpoint,key:''},'claude-web':{},'chatgpt-web':{}};}

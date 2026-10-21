@@ -2,7 +2,7 @@ import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTe
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
-import { PROVIDERS, chat as aiChat, listModels as aiListModels, buildContext, pageText, SYSTEM_PROMPT, userTurn, defaultSettings as aiDefaults } from './ai.mjs';
+import { PROVIDERS, chat as aiChat, listModels as aiListModels, buildContext, pageText, SYSTEM_PROMPT, userTurn, manualPrompt, defaultSettings as aiDefaults } from './ai.mjs';
 import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS, APPLE, defaultMime, blobToWav, getMediaDir, setMediaDir, folderSupported, folderPermission, writeToFolder } from './media.mjs';
 import { makeClip, encodeClip, decodeClip, placeClip } from './clip.mjs';
 import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
@@ -472,7 +472,7 @@ function aiSettings(){
 function saveAiSettings(v){try{localStorage.setItem(AI_STORE,JSON.stringify(v));}catch{}}
 let aiHistory=[],aiAbort=null;
 const aiPanel=$('ai-panel');document.body.append(aiPanel,$('ai-dialog'));
-function aiModelLabel(){const st=aiSettings(),cfg=st[st.provider];const lab=$('ai-model-label');lab.textContent=(PROVIDERS[st.provider].label.replace(/（.*）/,''))+'・'+(cfg.model||'モデル未設定');lab.classList.toggle('cloud',PROVIDERS[st.provider].cloud);lab.title=PROVIDERS[st.provider].cloud?'質問とノートの抜粋はこのクラウドに送られます':'この PC の中で動くモデルです';}
+function aiModelLabel(){const st=aiSettings(),cfg=st[st.provider];const lab=$('ai-model-label');lab.textContent=PROVIDERS[st.provider].manual?PROVIDERS[st.provider].siteName+'（サブスク・コピーして開く）':(PROVIDERS[st.provider].label.replace(/（.*）/,''))+'・'+(cfg.model||'モデル未設定');lab.classList.toggle('cloud',PROVIDERS[st.provider].cloud);lab.title=PROVIDERS[st.provider].cloud?'質問とノートの抜粋はこのクラウドに送られます':'この PC の中で動くモデルです';}
 function setAiPanel(open){aiPanel.hidden=!open;$('ai-toggle').setAttribute('aria-expanded',String(open));if(open){aiModelLabel();setTimeout(()=>$('ai-input').focus({preventScroll:true}),0);}}
 $('ai-toggle').onclick=()=>setAiPanel(aiPanel.hidden);
 $('ai-close').onclick=()=>setAiPanel(false);
@@ -497,6 +497,30 @@ function renderAnswer(box,text,sources){
  }
 }
 function aiOpenSource(id){if(!pageById(id)){message('そのページは見つかりません（削除されたかもしれません）。');return;}openPage(id);if(matchMedia('(max-width:700px)').matches)setAiPanel(false);}
+function finishAnswer(box,text,sources){
+ box.classList.remove('thinking','manual');renderAnswer(box,text||'（答えが空でした）',sources);
+ if(sources.length){const list=el('div','ai-sources');for(const src of sources){const b=el('button','','['+src.n+'] '+src.title+(src.where?'（'+src.where+'）':''));b.type='button';b.title='このページを開く';b.onclick=()=>aiOpenSource(src.id);list.append(b);}box.append(list);}
+ const tools=el('div','ai-tools'),put=el('button','',''),cp=el('button','','');put.type='button';cp.type='button';put.append(icon('page'),'ページに貼り付け');cp.append(icon('copy'),'コピー');
+ put.onclick=()=>aiInsert(text);cp.onclick=async()=>{try{await navigator.clipboard.writeText(text);message('答えをコピーしました。');}catch{message('コピーできませんでした。');}};
+ tools.append(put,cp);box.append(tools);
+}
+// Subscription path: copy the prompt, open the chat site in a new tab, then take the pasted answer back.
+function askManual(question,st,box,ctx,scope){
+ const P=PROVIDERS[st.provider],prompt=manualPrompt(aiHistory.slice(-6),question,ctx,scopeLabel(scope));
+ const win=window.open(P.site,'yohaku-ai-'+st.provider); // inside the click/Enter, so the browser allows the new tab
+ const copy=()=>navigator.clipboard.writeText(prompt).then(()=>true,()=>false);
+ box.classList.remove('thinking');box.classList.add('manual');
+ const t=box.querySelector('.ai-text');t.textContent='';
+ copy().then(ok=>{
+  t.textContent=(ok?'質問と、探したノートの抜粋（'+prompt.length+' 字・'+ctx.sources.length+' ページ分）をコピーしました。':'自動でコピーできませんでした。下の「もう一度コピー」を押してください。')+(win?P.siteName+' を別のタブで開きました。':'')+'\n1. '+P.siteName+' の入力欄に貼り付けて（Ctrl+V）送信します。\n2. 答えが出たら、答えの下のコピーボタンでコピーします。\n3. この下の欄に貼り付けて「答えを取り込む」を押すと、根拠のページへのリンク付きで残せます。';
+ });
+ const row=el('div','ai-tools'),again=el('button','',''),open=el('button','','');again.type='button';open.type='button';again.append(icon('copy'),'もう一度コピー');open.append(icon('sparkle'),P.siteName+' を開く');
+ again.onclick=async()=>message((await copy())?'もう一度コピーしました。':'コピーできませんでした。');open.onclick=()=>window.open(P.site,'yohaku-ai-'+st.provider);
+ const paste=document.createElement('textarea');paste.className='ai-paste';paste.rows=4;paste.placeholder=P.siteName+' の答えをここに貼り付け';paste.setAttribute('aria-label',P.siteName+' の答え');
+ const take=el('button','primary','');take.type='button';take.append(icon('check'),'答えを取り込む');
+ take.onclick=()=>{const ans=paste.value.trim();if(!ans){paste.focus();return;}row.remove();paste.remove();take.remove();aiHistory.push({role:'user',content:question},{role:'assistant',content:ans});finishAnswer(box,ans,ctx.sources);$('ai-log').scrollTop=$('ai-log').scrollHeight;};
+ row.append(again,open);box.append(row,paste,take);
+}
 async function askAi(question){
  question=question.trim();if(!question||aiAbort)return;
  const st=aiSettings(),prov=PROVIDERS[st.provider],scope=$('ai-scope').value;
@@ -505,17 +529,14 @@ async function askAi(question){
  const box=el('div','ai-a thinking');box.append(el('div','ai-text','ノートを探しています…'));log.append(box);log.scrollTop=log.scrollHeight;
  const docs=aiDocs(scope);
  const ctx=buildContext(docs,question,{budget:prov.budget});
+ if(prov.manual){askManual(question,st,box,ctx,scope);log.scrollTop=log.scrollHeight;return;}
  const messages=[...aiHistory.slice(-6),{role:'user',content:userTurn(question,ctx,scopeLabel(scope))}];
  let text='';aiAbort=new AbortController();$('ai-send').hidden=true;$('ai-stop').hidden=false;
  box.querySelector('.ai-text').textContent='';
  try{
   text=await aiChat(st,{system:SYSTEM_PROMPT,messages,signal:aiAbort.signal,onText:d=>{text+=d;box.querySelector('.ai-text').textContent=text;log.scrollTop=log.scrollHeight;}});
-  box.classList.remove('thinking');renderAnswer(box,text||'（答えが空でした）',ctx.sources);
   aiHistory.push({role:'user',content:question},{role:'assistant',content:text});
-  if(ctx.sources.length){const list=el('div','ai-sources');for(const src of ctx.sources){const b=el('button','','['+src.n+'] '+src.title+(src.where?'（'+src.where+'）':''));b.type='button';b.title='このページを開く';b.onclick=()=>aiOpenSource(src.id);list.append(b);}box.append(list);}
-  const tools=el('div','ai-tools'),put=el('button','',''),cp=el('button','','');put.type='button';cp.type='button';put.append(icon('page'),'ページに貼り付け');cp.append(icon('copy'),'コピー');
-  put.onclick=()=>aiInsert(text);cp.onclick=async()=>{try{await navigator.clipboard.writeText(text);message('答えをコピーしました。');}catch{message('コピーできませんでした。');}};
-  tools.append(put,cp);box.append(tools);
+  finishAnswer(box,text,ctx.sources);
  }catch(e){
   box.classList.remove('thinking');box.classList.add('error');
   const aborted=e.name==='AbortError';const t=box.querySelector('.ai-text');
@@ -538,7 +559,9 @@ const AI_HELP={
  anthropic:'Claude を使います。<a href="https://console.anthropic.com/" target="_blank" rel="noopener">Anthropic のコンソール</a>で API キーを作って入れてください（有料・使った分だけ）。質問と、探したノートの抜粋が Anthropic に送られます。',
  openai:'OpenAI のモデルを使います。API キーは文字起こし用に入れたものがあれば、そのまま使えます（有料）。質問と、探したノートの抜粋が OpenAI に送られます。',
  ollama:'この PC で動く <b>Ollama</b> を使います。ノートは PC の外に出ません。<br>1. <a href="https://ollama.com/" target="_blank" rel="noopener">ollama.com</a> から入れ、モデルを取得します（例：<code>ollama pull qwen3:8b</code>）。<br>2. このサイトからの接続を許可するため、Windows の環境変数 <code>OLLAMA_ORIGINS</code> に <code>https://kusimaru.github.io</code> を設定し、Ollama を起動し直します。<br>3. 初回は Edge が「ローカル ネットワークへのアクセス」の許可を求めるので「許可」を押します。<br>iPad からは使えません（iPad の中では動かないため）。',
- compat:'LM Studio など、OpenAI 互換の API を持つサーバーを使います。LM Studio なら「Developer」タブでサーバーを起動し、「Enable CORS」をオンにします。接続先は通常 <code>http://localhost:1234/v1</code> です。',
+ compat:'この PC で動く <b>LM Studio</b> を使います。ノートは PC の外に出ません。<br>1. LM Studio でモデルを読み込みます。<br>2. 「Developer」（開発者）タブでサーバーを起動し、設定の「Enable CORS」をオンにします。接続先は通常 <code>http://localhost:1234/v1</code> です。<br>3. 「モデル一覧を取得」で読み込んだモデルを選びます。初回は Edge が「ローカル ネットワークへのアクセス」の許可を求めるので「許可」を押します。<br>ほかの OpenAI 互換サーバーも、接続先を変えれば使えます。iPad からは使えません。',
+ 'claude-web':'契約中の <b>Claude のサブスク</b>（Pro・Max）で使います。API キーは要りません。<br>サブスクには他のアプリから呼び出す窓口が無いため、質問するたびに、質問と探したノートの抜粋をコピーして claude.ai を別のタブで開きます。貼り付けて送信し、出てきた答えをコピーしてこのパネルに貼り付けると、根拠のページへのリンク付きで残せます。<br>ノートの抜粋は claude.ai（Anthropic）に送られます。',
+ 'chatgpt-web':'契約中の <b>ChatGPT のサブスク</b>（Plus・Pro）で使います。API キーは要りません。<br>質問するたびに、質問と探したノートの抜粋をコピーして chatgpt.com を別のタブで開きます。貼り付けて送信し、答えをコピーしてこのパネルに貼り付けます。<br>ノートの抜粋は ChatGPT（OpenAI）に送られます。',
 };
 let aiDialogProv=null; // the provider whose fields the dialog is showing
 let aiDialogDraft=null; // unsaved edits while switching providers in the dialog
@@ -547,21 +570,22 @@ function fillAiDialog(st,prov){
  const sel=$('ai-provider');if(!sel.options.length)for(const [k,v] of Object.entries(PROVIDERS)){const o=document.createElement('option');o.value=k;o.textContent=v.label;sel.append(o);}
  sel.value=prov;const cfg=st[prov],P=PROVIDERS[prov];
  $('ai-provider-help').innerHTML=AI_HELP[prov];
- $('ai-endpoint-row').hidden=P.cloud;$('ai-endpoint').value=cfg.endpoint||P.endpoint;
- $('ai-key-row').hidden=!(P.needsKey||prov==='compat');$('ai-key').value=cfg.key||'';$('ai-key').placeholder=prov==='compat'?'必要なときだけ（この端末にだけ保存）':'この端末にだけ保存されます';
+ $('ai-endpoint-row').hidden=P.cloud;$('ai-endpoint').value=cfg.endpoint||P.endpoint||'';
+ $('ai-model-row').hidden=!!P.manual;document.querySelector('.ai-dialog-tools').hidden=!!P.manual;
+ $('ai-key-row').hidden=!!P.manual||!(P.needsKey||prov==='compat');$('ai-key').value=cfg.key||'';$('ai-key').placeholder=prov==='compat'?'必要なときだけ（この端末にだけ保存）':'この端末にだけ保存されます';
  $('ai-model').value=cfg.model||'';const dl=$('ai-models');dl.replaceChildren();for(const m of P.models){const o=document.createElement('option');o.value=m;dl.append(o);}
  $('ai-list-models').hidden=P.cloud&&prov==='anthropic';$('ai-test-result').textContent='';
 }
 function readAiDialog(){
  const st=aiDialogDraft||aiSettings(),prov=aiDialogProv||$('ai-provider').value,P=PROVIDERS[prov];st.provider=prov;
- st[prov]={...st[prov],model:$('ai-model').value.trim(),key:$('ai-key').value.trim()};if(!P.cloud)st[prov].endpoint=$('ai-endpoint').value.trim()||P.endpoint;
+ if(!P.manual){st[prov]={...st[prov],model:$('ai-model').value.trim(),key:$('ai-key').value.trim()};if(!P.cloud)st[prov].endpoint=$('ai-endpoint').value.trim()||P.endpoint;}
  return st;
 }
 function openAiSettings(){const st=aiSettings();aiDialogDraft=null;fillAiDialog(st,st.provider);if(!$('ai-dialog').open)$('ai-dialog').showModal();}
 $('ai-settings-open').onclick=openAiSettings;
 $('ai-provider').onchange=()=>{aiDialogDraft=readAiDialog();const next=$('ai-provider').value;aiDialogDraft.provider=next;fillAiDialog(aiDialogDraft,next);}; // keep the fields of the provider being left in the draft
 $('ai-dialog-close').onclick=()=>{aiDialogDraft=null;$('ai-dialog').close();};
-$('ai-dialog').querySelector('form').addEventListener('submit',()=>{const st=readAiDialog();aiDialogDraft=null;saveAiSettings(st);aiModelLabel();message('AI の設定を保存しました：'+PROVIDERS[st.provider].label+'・'+(st[st.provider].model||'モデル未設定'));});
+$('ai-dialog').querySelector('form').addEventListener('submit',()=>{const st=readAiDialog();aiDialogDraft=null;saveAiSettings(st);aiModelLabel();message('AI の設定を保存しました：'+PROVIDERS[st.provider].label+(PROVIDERS[st.provider].manual?'':'・'+(st[st.provider].model||'モデル未設定')));});
 $('ai-list-models').onclick=async()=>{
  const st=readAiDialog(),out=$('ai-test-result');out.textContent='モデル一覧を取得しています…';
  try{const list=await aiListModels(st);const dl=$('ai-models');dl.replaceChildren();for(const m of list){const o=document.createElement('option');o.value=m;dl.append(o);}

@@ -950,3 +950,7 @@ body .ai-tools button{min-height:34px;padding:3px 10px;font-size:var(--ui-fs-sm)
 .ai-help code{background:#fff;border:1px solid #dce3dd;border-radius:4px;padding:0 4px;font-size:.92em}
 .ai-dialog-tools{justify-content:flex-start}
 @media(max-width:700px){.ai-panel{left:8px;right:8px;width:auto;top:52px;bottom:8px}}
+
+.ai-a.manual .ai-text{color:#2b3f38}
+.ai-paste{width:100%;box-sizing:border-box;margin-top:8px;font:inherit;font-size:var(--ui-fs-sm);border:1px dashed #8fa99a;border-radius:8px;padding:8px;min-height:84px;resize:vertical}
+.ai-a.manual>.primary{margin-top:6px}

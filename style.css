@@ -954,3 +954,16 @@ body .ai-tools button{min-height:34px;padding:3px 10px;font-size:var(--ui-fs-sm)
 .ai-a.manual .ai-text{color:#2b3f38}
 .ai-paste{width:100%;box-sizing:border-box;margin-top:8px;font:inherit;font-size:var(--ui-fs-sm);border:1px dashed #8fa99a;border-radius:8px;padding:8px;min-height:84px;resize:vertical}
 .ai-a.manual>.primary{margin-top:6px}
+
+/* ---------- resizable borders: sidebar width and the notebook / page columns ---------- */
+.nav-notebooks{flex-basis:var(--nb-col,48%)}
+.col-splitter{flex:none;width:12px;margin:0 -6px;position:relative;z-index:3;cursor:col-resize;touch-action:none}
+.col-splitter::after,.rail-splitter::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:3px;margin-left:-1.5px;border-radius:2px;background:transparent;transition:background .15s}
+.col-splitter:hover::after,.col-splitter:focus-visible::after,.col-splitter.dragging::after,
+.rail-splitter:hover::after,.rail-splitter:focus-visible::after,.rail-splitter.dragging::after{background:#4e8068}
+.col-splitter:focus-visible,.rail-splitter:focus-visible{outline:none}
+.rail-splitter{position:fixed;top:0;bottom:0;left:calc(var(--rail) - 7px);width:14px;z-index:95;cursor:col-resize;touch-action:none}
+body.nav-collapsed .rail-splitter{display:none}
+body.resizing,body.resizing *{cursor:col-resize !important;user-select:none !important;-webkit-user-select:none !important}
+@media(max-width:1180px){.rail-splitter{left:calc(min(var(--rail),94vw) - 7px)}body:not(.nav-open) .rail-splitter{display:none}}
+@media(max-width:700px){.col-splitter,.rail-splitter{display:none}}

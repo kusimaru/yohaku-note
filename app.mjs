@@ -835,6 +835,36 @@ const qualityLimits=()=>quality==='light'?{dpr:1,pixels:2.5e6}:{dpr:3,pixels:8e6
 let uiSize='large';try{const v=localStorage.getItem('yohaku-ui-size');if(['normal','large','xlarge'].includes(v))uiSize=v;}catch{}
 document.body.dataset.ui=uiSize;$('ui-size').value=uiSize;
 $('ui-size').onchange=e=>{uiSize=e.target.value;document.body.dataset.ui=uiSize;try{localStorage.setItem('yohaku-ui-size',uiSize);}catch{}layout();};
+// ---- draggable borders: the sidebar's right edge (--rail) and the notebook / page column split (--nb-col) ----
+// Mouse, pen and finger all work (pointer capture). Double-click (or Home) puts the border back; the widths are
+// remembered on this device. Arrow keys move a focused border by 16 px.
+function makeSplitter(handle,{key,prop,min,max,from}){
+ const apply=v=>{if(v==null)document.body.style.removeProperty(prop);else document.body.style.setProperty(prop,Math.round(v)+'px');};
+ const clampV=v=>Math.max(min(),Math.min(max(),v));
+ let saved=null;try{const v=Number(localStorage.getItem(key));if(v>0)saved=v;}catch{}
+ if(saved)apply(clampV(saved));
+ const persist=v=>{try{if(v==null)localStorage.removeItem(key);else localStorage.setItem(key,String(Math.round(v)));}catch{}};
+ const current=()=>{const v=parseFloat(getComputedStyle(document.body).getPropertyValue(prop));return Number.isFinite(v)?v:null;};
+ let drag=null;
+ handle.addEventListener('pointerdown',e=>{
+  if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();e.stopPropagation();
+  drag={id:e.pointerId};try{handle.setPointerCapture(e.pointerId);}catch{}handle.classList.add('dragging');document.body.classList.add('resizing');
+ });
+ handle.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;e.preventDefault();const v=clampV(e.clientX-from());apply(v);drag.v=v;});
+ const end=e=>{if(!drag||e.pointerId!==drag.id)return;if(drag.v!=null)persist(drag.v);drag=null;handle.classList.remove('dragging');document.body.classList.remove('resizing');layout();};
+ handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);handle.addEventListener('lostpointercapture',end);
+ const reset=()=>{apply(null);persist(null);layout();message('境目の位置を元に戻しました。');};
+ handle.addEventListener('dblclick',reset);
+ handle.addEventListener('keydown',e=>{
+  if(e.key==='Home'){e.preventDefault();reset();return;}
+  if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();
+  const base=current()??(handle.getBoundingClientRect().left+handle.offsetWidth/2-from());
+  const v=clampV(base+(e.key==='ArrowRight'?16:-16));apply(v);persist(v);layout();
+ });
+ window.addEventListener('resize',()=>{const v=current();if(v!=null&&document.body.style.getPropertyValue(prop)){const c=clampV(v);if(c!==v)apply(c);}});
+}
+makeSplitter($('rail-splitter'),{key:'yohaku-rail-width',prop:'--rail',min:()=>300,max:()=>Math.max(320,Math.min(1100,innerWidth-360)),from:()=>0});
+makeSplitter($('col-splitter'),{key:'yohaku-nb-col-width',prop:'--nb-col',min:()=>150,max:()=>{const w=document.querySelector('.nav-cols').getBoundingClientRect().width;return Math.max(160,w-170);},from:()=>document.querySelector('.nav-cols').getBoundingClientRect().left});
 $('view-quality').value=quality;
 $('view-quality').onchange=e=>{quality=e.target.value==='light'?'light':'normal';try{localStorage.setItem('yohaku-quality',quality);}catch{}updateViewportCanvas(true);message(quality==='light'?'描画を「軽い」にしました。手書きの解像度を下げて、ペンの遅れを減らします。':'描画を「標準」に戻しました。');};
 let inkView={top:0,bottom:0,k:1},viewRaf=0;

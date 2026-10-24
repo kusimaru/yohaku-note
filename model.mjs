@@ -178,16 +178,42 @@ export const folderOf=(doc,id)=>id?(doc.folders||[]).find(f=>f.id===id):undefine
 export const foldersIn=(doc,sectionId)=>(doc.folders||[]).filter(f=>f.sectionId===sectionId);
 // the folder a page is shown in (only when that folder lives in the page's own section)
 export const pageFolder=(doc,p)=>{const f=folderOf(doc,p?.folderId);return f&&f.sectionId===p.sectionId?f:null;};
-export function addFolder(doc,sectionId,name){
+// Folders can sit inside other folders of the same section (folder.parentId). The folder a folder is shown in;
+// null = directly in the section. A parent in another section, a missing one, or a loop counts as none.
+export function folderParent(doc,f){
+ const up=x=>{const n=folderOf(doc,x?.parentId);return n&&n.sectionId===x.sectionId?n:null;};
+ const p=up(f);if(!p)return null;
+ const seen=new Set([f.id]);for(let x=p;x;x=up(x)){if(seen.has(x.id))return null;seen.add(x.id);}
+ return p;
+}
+export const foldersUnder=(doc,sectionId,parentId=null)=>foldersIn(doc,sectionId).filter(f=>(folderParent(doc,f)?.id??null)===parentId);
+// the folders from the section down to `f` (for the breadcrumb)
+export function folderPath(doc,f){const out=[];for(let x=f;x;x=folderParent(doc,x))out.unshift(x);return out;}
+// the folder and every folder inside it, at any depth
+export function folderTree(doc,id){
+ const f=folderOf(doc,id);if(!f)return new Set();const ids=new Set([id]);
+ for(let grew=true;grew;){grew=false;for(const x of foldersIn(doc,f.sectionId))if(!ids.has(x.id)&&ids.has(folderParent(doc,x)?.id)){ids.add(x.id);grew=true;}}
+ return ids;
+}
+export function addFolder(doc,sectionId,name,parentId=null){
  ensureStructure(doc);if(!sectionOf(doc,sectionId))return null;
- const f={id:crypto.randomUUID(),sectionId,name:cleanName(name||uniqueName(foldersIn(doc,sectionId).map(x=>x.name),'新しいフォルダ'),'新しいフォルダ')};
+ const parent=parentId?folderOf(doc,parentId):null;if(parentId&&(!parent||parent.sectionId!==sectionId))return null;
+ const f={id:crypto.randomUUID(),sectionId,name:cleanName(name||uniqueName(foldersUnder(doc,sectionId,parent?.id??null).map(x=>x.name),'新しいフォルダ'),'新しいフォルダ')};
+ if(parent)f.parentId=parent.id;
  doc.folders.push(f);return f;
 }
+// Put a folder inside another folder of its section (or directly in the section with null). Not into itself or its own folders.
+export function setFolderParent(doc,id,parentId){
+ const f=folderOf(doc,id);if(!f)return false;
+ if(parentId){const p=folderOf(doc,parentId);if(!p||p.sectionId!==f.sectionId||folderTree(doc,id).has(parentId)||f.parentId===parentId)return false;f.parentId=parentId;return true;}
+ if(f.parentId===undefined)return false;delete f.parentId;return true;
+}
 export function renameFolder(doc,id,name){const f=folderOf(doc,id),t=String(name??'').trim();if(!f||!t||t.length>60)return null;f.name=t;return t;}
-// Remove a folder; its pages stay in the section (returns how many pages were in it).
+// Remove a folder; its pages and folders stay, one level up (returns how many pages were directly in it).
 export function deleteFolder(doc,id){
- const f=folderOf(doc,id);if(!f)return null;let n=0;
- for(const p of doc.pages)if(p.folderId===id){delete p.folderId;n++;}
+ const f=folderOf(doc,id);if(!f)return null;const up=folderParent(doc,f);let n=0;
+ for(const p of doc.pages)if(p.folderId===id){if(up)p.folderId=up.id;else delete p.folderId;n++;}
+ for(const x of doc.folders)if(x.parentId===id){if(up)x.parentId=up.id;else delete x.parentId;}
  doc.folders=doc.folders.filter(x=>x.id!==id);return n;
 }
 // Put a page into a folder (or take it out with folderId null). The folder must be in the page's section.
@@ -201,8 +227,9 @@ export function setPageFolder(doc,pageId,folderId){
 // The position is found through doc.pages order, so it stays put when that page later moves into a folder;
 // a folder whose page is gone goes to the end.
 export function setFolderPlace(doc,id,before){const f=folderOf(doc,id);if(!f)return false;const v=before==null?undefined:String(before);if(f.before===v)return false;if(v===undefined)delete f.before;else f.before=v;return true;}
-export function pageColumn(doc,sectionId,loosePages){
- const folders=foldersIn(doc,sectionId),idx=new Map(doc.pages.map((p,i)=>[p.id,i]));
+// `loosePages` are the pages of one level (directly in the section, or directly in folder `parentId`).
+export function pageColumn(doc,sectionId,loosePages,parentId=null){
+ const folders=foldersUnder(doc,sectionId,parentId),idx=new Map(doc.pages.map((p,i)=>[p.id,i]));
  const slot=new Map(); // loose page index in loosePages -> folders before it; 'top' / 'end'
  const top=[],end=[];
  for(const f of folders){
@@ -217,15 +244,19 @@ export function pageColumn(doc,sectionId,loosePages){
  for(const f of end)out.push({folder:f});
  return out;
 }
-// Reorder a folder (before folder `beforeId` in `sectionId`, or last) and/or move it with its pages to another section.
+// Reorder a folder (before folder `beforeId` in `sectionId`, or last) and/or move it to another section, together with
+// the folders inside it and all their pages (it then sits directly in that section; setFolderParent can put it deeper).
 export function moveFolder(doc,id,sectionId,beforeId=null){
  const f=folderOf(doc,id);if(!f||!sectionOf(doc,sectionId)||beforeId===id)return false;
- const from=f.sectionId;
+ const from=f.sectionId,tree=from!==sectionId?folderTree(doc,id):null;
  const rest=doc.folders.filter(x=>x.id!==id);f.sectionId=sectionId;
  let index=beforeId?rest.findIndex(x=>x.id===beforeId&&x.sectionId===sectionId):-1;
  if(index<0){index=rest.length;for(let i=rest.length-1;i>=0;i--)if(rest[i].sectionId===sectionId){index=i+1;break;}}
  rest.splice(index,0,f);doc.folders=rest;
- if(from!==sectionId)for(const p of doc.pages.filter(x=>x.folderId===id&&x.sectionId===from)){movePage(doc,p.id,sectionId,null);p.folderId=id;}
+ if(tree){
+  delete f.parentId;for(const x of doc.folders)if(tree.has(x.id))x.sectionId=sectionId;
+  for(const p of doc.pages.filter(x=>tree.has(x.folderId)&&x.sectionId===from)){const fid=p.folderId;movePage(doc,p.id,sectionId,null);p.folderId=fid;}
+ }
  return true;
 }
 // Fill in the structure: a default notebook, sections migrated from the old category names
@@ -290,7 +321,7 @@ function orderBy(items,baseIds,otherIds){
  const restPos=new Map(otherIds.map((id,i)=>[id,i]));rest.sort((a,b)=>(restPos.get(a.id)??1e9)-(restPos.get(b.id)??1e9));
  return [...items.filter(x=>pos.has(x.id)).sort((a,b)=>pos.get(a.id)-pos.get(b.id)),...rest];
 }
-const cleanFolder=x=>x&&typeof x.id==='string'&&x.id.length<=100&&typeof x.sectionId==='string'&&x.sectionId.length<=100&&typeof x.name==='string'&&x.name.trim()?{id:x.id,sectionId:x.sectionId,name:x.name.slice(0,60),...(typeof x.before==='string'&&x.before.length<=100?{before:x.before}:{}),updatedAt:Number.isFinite(x.updatedAt)?x.updatedAt:0}:null;
+const cleanFolder=x=>x&&typeof x.id==='string'&&x.id.length<=100&&typeof x.sectionId==='string'&&x.sectionId.length<=100&&typeof x.name==='string'&&x.name.trim()?{id:x.id,sectionId:x.sectionId,name:x.name.slice(0,60),...(typeof x.before==='string'&&x.before.length<=100?{before:x.before}:{}),...(typeof x.parentId==='string'&&x.parentId.length<=100?{parentId:x.parentId}:{}),updatedAt:Number.isFinite(x.updatedAt)?x.updatedAt:0}:null;
 export function structureSig(doc){return JSON.stringify([(doc.notebooks||[]).map(cleanNotebook),(doc.sections||[]).map(cleanSection),Object.entries(removedOf(doc)).sort(),doc.pages.map(p=>p.id),(doc.folders||[]).map(cleanFolder)]);}
 export function mergeStructure(doc,remote) {
  ensureStructure(doc);
@@ -355,14 +386,32 @@ export function setNotebookColor(doc,id,color){const nb=notebookOf(doc,id);if(!n
 // Move a page into `sectionId`, placed before page `beforeId` (same section) or at the end.
 // Turn a folder into a section of its own in `notebookId` (before section `beforeId`, or last). Its pages move with it
 // in their order; the folder itself goes away. Returns {section,pageIds} or null.
+// Folders inside it become the new section's folders (nesting kept).
 export function folderToSection(doc,id,notebookId,beforeId=null){
  const f=folderOf(doc,id);if(!f||!notebookOf(doc,notebookId))return null;
+ const tree=folderTree(doc,id),from=f.sectionId;
  const sec=addSection(doc,notebookId,f.name);if(!sec)return null;
  if(beforeId)moveSection(doc,sec.id,notebookId,beforeId);
- const pageIds=doc.pages.filter(x=>x.folderId===id).map(x=>x.id);
- for(const pid of pageIds)movePage(doc,pid,sec.id,null);
+ const pageIds=doc.pages.filter(x=>x.sectionId===from&&tree.has(x.folderId)).map(x=>x.id);
+ for(const pid of pageIds){const p=doc.pages.find(x=>x.id===pid),fid=p.folderId;movePage(doc,pid,sec.id,null);if(fid!==id)p.folderId=fid;}
+ for(const x of doc.folders)if(tree.has(x.id)&&x.id!==id){x.sectionId=sec.id;if(x.parentId===id)delete x.parentId;}
  doc.folders=doc.folders.filter(x=>x.id!==id);
  return {section:sec,pageIds};
+}
+// The other way round: a whole section goes inside another section (or inside folder `parentId` there) as a folder
+// with the section's name, at the end. Its pages and folders come along, keeping their order and nesting. The emptied
+// section is removed (not to the trash: nothing is lost). Returns {folder,pageIds} or null.
+export function sectionToFolder(doc,sectionId,targetSectionId,parentId=null){
+ const sec=sectionOf(doc,sectionId),target=sectionOf(doc,targetSectionId);if(!sec||!target||sec.id===target.id)return null;
+ const parent=parentId?folderOf(doc,parentId):null;if(parentId&&(!parent||parent.sectionId!==target.id))return null;
+ const f=addFolder(doc,target.id,sec.name,parent?.id??null);if(!f)return null;f.before='';
+ const inner=foldersIn(doc,sec.id),innerIds=new Set(inner.map(x=>x.id)),roots=inner.filter(x=>!folderParent(doc,x));
+ const pageIds=pagesIn(doc,sec.id).map(x=>x.id);
+ for(const pid of pageIds){const p=doc.pages.find(x=>x.id===pid),fid=innerIds.has(p.folderId)?p.folderId:f.id;movePage(doc,pid,target.id,null);p.folderId=fid;}
+ for(const x of roots)x.parentId=f.id;
+ for(const x of inner)x.sectionId=target.id;
+ doc.sections=doc.sections.filter(x=>x.id!==sec.id);
+ return {folder:f,pageIds};
 }
 export function movePage(doc,pageId,sectionId,beforeId=null) {
  const p=doc.pages.find(x=>x.id===pageId);if(!p||beforeId===pageId||!sectionOf(doc,sectionId))return false;
@@ -476,7 +525,7 @@ export function validateBackup(doc) {
  const checkSection=x=>{if(!x||typeof x.id!=='string'||x.id.length>100||secIds.has(x.id)||typeof x.notebookId!=='string'||x.notebookId.length>100||typeof x.name!=='string'||!x.name.trim()||x.name.length>60||!hex.test(x.color||''))bad();secIds.add(x.id);};
  if(doc.notebooks!==undefined){if(!Array.isArray(doc.notebooks)||doc.notebooks.length>100)bad();for(const n of doc.notebooks)checkNotebook(n);}
  if(doc.sections!==undefined){if(!Array.isArray(doc.sections)||doc.sections.length>500)bad();for(const x of doc.sections)checkSection(x);}
- if(doc.folders!==undefined){if(!Array.isArray(doc.folders)||doc.folders.length>1000)bad();const fIds=new Set();for(const f of doc.folders){if(!f||typeof f.id!=='string'||f.id.length>100||fIds.has(f.id)||typeof f.sectionId!=='string'||f.sectionId.length>100||typeof f.name!=='string'||!f.name.trim()||f.name.length>60||(f.before!==undefined&&(typeof f.before!=='string'||f.before.length>100)))bad();fIds.add(f.id);}}
+ if(doc.folders!==undefined){if(!Array.isArray(doc.folders)||doc.folders.length>1000)bad();const fIds=new Set();for(const f of doc.folders){if(!f||typeof f.id!=='string'||f.id.length>100||fIds.has(f.id)||typeof f.sectionId!=='string'||f.sectionId.length>100||typeof f.name!=='string'||!f.name.trim()||f.name.length>60||(f.before!==undefined&&(typeof f.before!=='string'||f.before.length>100))||(f.parentId!==undefined&&(typeof f.parentId!=='string'||f.parentId.length>100)))bad();fIds.add(f.id);}}
  const ids=new Set();let points=0,totalImages=0;
  const checkPage=p=>{
   if(!p||typeof p.id!=='string'||p.id.length>100||ids.has(p.id)||typeof p.title!=='string'||p.title.length>120||

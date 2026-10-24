@@ -1,4 +1,4 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, folderOf, foldersIn, pageFolder, addFolder, renameFolder, deleteFolder, setPageFolder, moveFolder, setFolderPlace, pageColumn, folderToSection, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, folderOf, foldersIn, pageFolder, addFolder, renameFolder, deleteFolder, setPageFolder, moveFolder, setFolderPlace, pageColumn, folderToSection, folderParent, foldersUnder, folderPath, folderTree, setFolderParent, sectionToFolder, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
@@ -204,23 +204,27 @@ function renderPageList() {
   button.onclick=e=>{if(wantsSelect(e)){toggleSelect('page',pg.id,e.shiftKey);return;}openPage(pg.id);};
   const item=el('div','page-item');item.append(button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));into.append(item);
  };
- // folders sit among the pages that are in no folder (folder.before); with a sort order, folders come first
- const folderRow=f=>{
-  const inside=list.filter(pg=>pg.folderId===f.id),open=!closedFolders.has(f.id)||inside.some(pg=>pg.id===doc.activeId&&!folderToggled.has(f.id));
+ // folders sit among the pages of their level (folder.before) and can hold folders; with a sort order, folders come first
+ const activePath=new Set(folderPath(doc,pageFolder(doc,page())).map(x=>x.id));
+ const folderRow=(f,into)=>{
+  const tree=folderTree(doc,f.id),inside=list.filter(pg=>pageFolder(doc,pg)?.id===f.id),total=list.filter(pg=>tree.has(pageFolder(doc,pg)?.id)).length;
+  const open=!closedFolders.has(f.id)||(activePath.has(f.id)&&!folderToggled.has(f.id));
   const wrap=el('div','folder'+(open?'':' closed'));wrap.dataset.folderId=f.id;
   const head=el('div','folder-item');
-  const fb=el('button','folder-button');fb.type='button';fb.draggable=true;fb.dataset.folderId=f.id;fb.setAttribute('aria-expanded',String(open));fb.title='クリックで開閉 / ページをここへドラッグで入れる / ドラッグで並べ替え';
-  fb.append(icon('chevron-down','chev'),icon('folder','folder-icon'),el('span','folder-name',f.name),el('small','folder-count',String(inside.length)));
+  const fb=el('button','folder-button');fb.type='button';fb.draggable=true;fb.dataset.folderId=f.id;fb.setAttribute('aria-expanded',String(open));fb.title='クリックで開閉 / ページやフォルダをここへドラッグで入れる / ドラッグで並べ替え';
+  fb.append(icon('chevron-down','chev'),icon('folder','folder-icon'),el('span','folder-name',f.name),el('small','folder-count',String(total)));
   fb.onclick=()=>{folderToggled.add(f.id);if(open)closedFolders.add(f.id);else closedFolders.delete(f.id);saveClosedFolders();renderPageList();};
   const add=el('button','folder-add icon-only','');add.type='button';add.title='このフォルダにページを追加';add.setAttribute('aria-label','フォルダ「'+f.name+'」にページを追加');add.append(icon('plus'));
   add.onclick=e=>{e.stopPropagation();showForm({kind:'new-page',folderId:f.id},'新しいページ（'+f.name+'）','','作成');};
   head.append(fb,add,menuButton({type:'folder',id:f.id,label:f.name}));wrap.append(head);
-  if(open){const pages=el('div','folder-pages');for(const pg of inside)pageRow(pg,pages);if(!inside.length)pages.append(el('div','folder-empty','ページをここへドラッグして入れます'));wrap.append(pages);}
-  box.append(wrap);
+  if(open){const pages=el('div','folder-pages');levelRows(inside,f.id,pages);if(!inside.length&&!foldersUnder(doc,cur.id,f.id).length)pages.append(el('div','folder-empty','ページをここへドラッグして入れます'));wrap.append(pages);}
+  into.append(wrap);
  };
- const loose=list.filter(pg=>!pageFolder(doc,pg));
- if(pageSort==='manual')for(const it of pageColumn(doc,cur.id,loose)){if(it.folder)folderRow(it.folder);else pageRow(it.page,box);}
- else{for(const f of foldersIn(doc,cur.id))folderRow(f);for(const pg of loose)pageRow(pg,box);}
+ const levelRows=(pages,parentId,into)=>{
+  if(pageSort==='manual')for(const it of pageColumn(doc,cur.id,pages,parentId)){if(it.folder)folderRow(it.folder,into);else pageRow(it.page,into);}
+  else{for(const f of foldersUnder(doc,cur.id,parentId))folderRow(f,into);for(const pg of pages)pageRow(pg,into);}
+ };
+ levelRows(list.filter(pg=>!pageFolder(doc,pg)),null,box);
  if(!list.length)box.append(el('div','pages-empty','このセクションにはまだページがありません。「ページの追加」で作れます。'));
  $('page-count').textContent=list.length;
  const labels={manual:'手動（ドラッグ順）',updated:'更新日が新しい順',name:'名前順'};
@@ -262,7 +266,9 @@ function openMenu(target,rect,holder) {
  menu.style.left=Math.max(4,left)+'px';menu.style.top=Math.max(4,top)+'px';
  $('menu-delete-label').textContent=target.type==='page'?'ページをゴミ箱へ':target.type==='folder'?'フォルダをやめる（中のページは残す）':target.type==='section'?'セクションをゴミ箱へ（中のページも）':'ノートブックをゴミ箱へ（中身ごと）';
  $('menu-delete').disabled=target.type==='notebook'&&doc.notebooks.length<2;
- $('menu-to-section').hidden=target.type!=='folder';
+ $('menu-to-section').hidden=target.type!=='folder';$('menu-new-subfolder').hidden=target.type!=='folder';
+ $('menu-move-to').hidden=target.type!=='folder'&&target.type!=='section';
+ $('menu-move-to-label').textContent=target.type==='section'?'ほかのセクションの中へ（フォルダにする）…':'ほかの場所へ移動…';
  $('menu-rename').focus();
 }
 function closeMenu(){$('item-menu').hidden=true;menuTarget?.holder?.classList.remove('menu-open');menuTarget=null;}
@@ -290,6 +296,61 @@ function makeSectionFromFolder(folderId,notebookId,beforeId){
  changed();breadcrumb();renderPages();
  message('フォルダ「'+f.name+'」をセクションにしました（'+r.pageIds.length+' ページ）。');
 }
+$('menu-new-subfolder').onclick=()=>{const t=menuTarget;closeMenu();if(!t||t.type!=='folder')return;showForm({kind:'new-folder',parentId:t.id},'新しいフォルダ（「'+t.label+'」の中）','','作成');};
+$('menu-move-to').onclick=()=>{const t=menuTarget;closeMenu();if(t)openMoveDialog(t);};
+// whole sections go inside another section (or a folder there) as folders, pages and folders included
+function putSectionsInto(ids,targetSectionId,parentId){
+ const target=sectionOf(doc,targetSectionId);if(!target)return;const names=[],pages=[];
+ for(const id of ids){if(id===targetSectionId)continue;const name=sectionOf(doc,id)?.name;const r=sectionToFolder(doc,id,targetSectionId,parentId);if(!r)continue;names.push(name);pages.push(...r.pageIds);closedFolders.delete(r.folder.id);}
+ if(ids.length>1)clearMulti(false);
+ if(!names.length)return;
+ const dest=parentId?folderOf(doc,parentId):null;if(dest)for(const x of folderPath(doc,dest))closedFolders.delete(x.id);
+ touchPages(pages);selectedSectionId=target.id;browsingNotebookId=null;browsingNotebooks=false;
+ changed();breadcrumb();renderPages();
+ message('セクション「'+names.join('」「')+'」をフォルダにして「'+(dest?dest.name:target.name)+'」の中へ移しました（'+pages.length+' ページ）。');
+}
+// put a folder (with everything in it) directly in section `sectionId`, or inside folder `parentId` there; at the end
+function putFolderInto(id,sectionId,parentId){
+ const f=folderOf(doc,id);if(!f||!sectionOf(doc,sectionId))return false;
+ const tree=folderTree(doc,id),from=f.sectionId,movedPages=doc.pages.filter(x=>tree.has(x.folderId)).map(x=>x.id);
+ if(parentId&&tree.has(parentId))return false;
+ moveFolder(doc,id,sectionId,null);setFolderParent(doc,id,parentId||null);setFolderPlace(doc,id,'');
+ if(from!==sectionId)touchPages(movedPages);
+ if(parentId)for(const x of folderPath(doc,folderOf(doc,parentId)))closedFolders.delete(x.id);
+ return true;
+}
+// ---- 「移動…」: pick where a folder goes, or which section a whole section goes into, without dragging (handy on a tablet) ----
+let moveSubject=null;
+function openMoveDialog(t){
+ const sel=$('move-target');sel.replaceChildren();
+ const blocked=t.type==='folder'?folderTree(doc,t.id):new Set();
+ for(const nb of doc.notebooks){
+  const g=document.createElement('optgroup');g.label=nb.name;
+  for(const sec of sectionsIn(doc,nb.id)){
+   if(t.type==='section'&&sec.id===t.id)continue;
+   g.append(new Option(sec.name+'（セクションの中）','sec:'+sec.id));
+   const walk=(parentId,depth)=>{for(const f of foldersUnder(doc,sec.id,parentId)){if(blocked.has(f.id))continue;g.append(new Option('\u3000'.repeat(depth)+'└ '+f.name,'fold:'+f.id));walk(f.id,depth+1);}};
+   walk(null,1);
+  }
+  if(g.children.length)sel.append(g);
+ }
+ if(!sel.options.length){message('移動先のセクションがありません。');return;}
+ if(t.type==='folder'){const f=folderOf(doc,t.id),up=f&&folderParent(doc,f);if(f)sel.value=up?'fold:'+up.id:'sec:'+f.sectionId;}
+ moveSubject=t;
+ $('move-title').textContent=(t.type==='folder'?'フォルダ「':'セクション「')+t.label+'」の移動先';
+ $('move-help').textContent=t.type==='folder'?'選んだセクション、またはフォルダの中へ、中のページやフォルダごと移ります。':'このセクションが同じ名前のフォルダになり、選んだ場所へ中のページごと移ります。';
+ $('move-dialog').showModal();sel.focus();
+}
+$('move-cancel').onclick=()=>{moveSubject=null;$('move-dialog').close();};
+$('move-dialog').querySelector('form').onsubmit=e=>{
+ e.preventDefault();const t=moveSubject;moveSubject=null;$('move-dialog').close();if(!t)return;
+ const v=$('move-target').value,i=v.indexOf(':'),kind=v.slice(0,i),id=v.slice(i+1);
+ const dest=kind==='fold'?folderOf(doc,id):null,secId=kind==='fold'?dest?.sectionId:id;if(!sectionOf(doc,secId))return;
+ if(t.type==='section'){putSectionsInto([t.id],secId,dest?.id||null);return;}
+ const f=folderOf(doc,t.id);if(!f||!putFolderInto(f.id,secId,dest?.id||null))return;
+ selectedSectionId=secId;browsingNotebookId=null;changed();breadcrumb();renderPages();
+ message('フォルダ「'+f.name+'」を「'+(dest?dest.name:sectionOf(doc,secId).name)+'」へ移しました。');
+};
 $('menu-to-section').onclick=()=>{const t=menuTarget;closeMenu();if(!t||t.type!=='folder')return;
  const sec=sectionOf(doc,folderOf(doc,t.id)?.sectionId);if(!sec)return;
  const sibs=sectionsIn(doc,sec.notebookId),i=sibs.findIndex(x=>x.id===sec.id);
@@ -522,7 +583,7 @@ function aiDocs(scope){
   if(scope==='section')return pg.sectionId===cur?.sectionId;
   if(scope==='notebook')return sectionOf(doc,pg.sectionId)?.notebookId===nb?.id;
   return true;
- }).map(pg=>{const s2=sectionOf(doc,pg.sectionId),n2=s2?notebookOf(doc,s2.notebookId):null;return {id:pg.id,title:pg.title||'名称未設定',where:[n2?.name,s2?.name,pageFolder(doc,pg)?.name].filter(Boolean).join(' › '),updatedAt:pg.updatedAt,text:pageText(pg)};}).filter(d=>d.text);
+ }).map(pg=>{const s2=sectionOf(doc,pg.sectionId),n2=s2?notebookOf(doc,s2.notebookId):null;return {id:pg.id,title:pg.title||'名称未設定',where:[n2?.name,s2?.name,...folderPath(doc,pageFolder(doc,pg)).map(x=>x.name)].filter(Boolean).join(' › '),updatedAt:pg.updatedAt,text:pageText(pg)};}).filter(d=>d.text);
 }
 const scopeLabel=v=>({all:'すべてのノート',notebook:'このノートブック',section:'このセクション',page:'このページ'})[v]||'すべてのノート';
 function renderAnswer(box,text,sources){
@@ -744,11 +805,14 @@ function dropTarget(e) {
  const pb=t.closest('.page-button'),st=t.closest('.section-tab'),nh=t.closest('.notebook-head'),pagesCol=t.closest('.nav-pages'),fb=t.closest('.folder-button'),fArea=t.closest('.folder');
  const half=(node)=>{const r=node.getBoundingClientRect();return e.clientY<r.top+r.height/2?'drop-before':'drop-after';};
  if(dragging.type==='folder'){
-  const own=fArea&&fArea.dataset.folderId===dragging.id;if(own)return null;
-  if(fb){const f=folderOf(doc,fb.dataset.folderId);return {mark:fb,cls:half(fb),folderId:f.id,sectionId:f.sectionId};}
-  if(pb){const tp=pageById(pb.dataset.pageId),pf=pageFolder(doc,tp);
-   if(pf){const h=fArea.querySelector('.folder-button');return {mark:h,cls:half(fArea),folderId:pf.id,sectionId:pf.sectionId};} // a page inside another folder: next to that folder
-   return {mark:pb,cls:half(pb),pageId:tp.id,sectionId:tp.sectionId};}
+  // onto a folder: its upper / lower quarter = before / after it, the middle = inside it. Never into itself or its own folders
+  const tree=folderTree(doc,dragging.id);
+  if(fb){const f=folderOf(doc,fb.dataset.folderId);if(!f||tree.has(f.id))return null;
+   const r=fb.getBoundingClientRect(),y=e.clientY-r.top,z=y<r.height*0.25?'drop-before':y>r.height*0.75?'drop-after':'drop-into';
+   return z==='drop-into'?{mark:fb,cls:z,into:f.id,sectionId:f.sectionId}:{mark:fb,cls:z,folderId:f.id,sectionId:f.sectionId};}
+  if(pb){const tp=pageById(pb.dataset.pageId),pf=pageFolder(doc,tp);if(!tp||(pf&&tree.has(pf.id)))return null;
+   return {mark:pb,cls:half(pb),pageId:tp.id,sectionId:tp.sectionId,parentId:pf?.id??null};} // next to a page, at that page's level
+  if(fArea){const f=folderOf(doc,fArea.dataset.folderId);if(!f||tree.has(f.id))return null;return {mark:fArea,cls:'drop-into',into:f.id,sectionId:f.sectionId};}
   if(st)return {mark:st,cls:'drop-into',sectionId:st.dataset.sectionId};
   // 「＋ 新しいセクション」 or a notebook's name: the folder becomes a new section there
   const asl=t.closest('.add-section-link');
@@ -767,8 +831,15 @@ function dropTarget(e) {
   return null;
  }
  if(dragging.type==='section'){
-  if(st){if(dragging.ids.includes(st.dataset.sectionId))return null;const sec=sectionOf(doc,st.dataset.sectionId);return {mark:st,cls:half(st),sectionId:sec.id,notebookId:sec.notebookId};}
+  // onto another section: upper / lower 30% = reorder, the middle = put it inside that section as a folder
+  if(st){if(dragging.ids.includes(st.dataset.sectionId))return null;const sec=sectionOf(doc,st.dataset.sectionId);
+   const r=st.getBoundingClientRect(),y=e.clientY-r.top,z=y<r.height*0.3?'drop-before':y>r.height*0.7?'drop-after':'drop-into';
+   return z==='drop-into'?{mark:st,cls:z,asFolder:true,sectionId:sec.id}:{mark:st,cls:z,sectionId:sec.id,notebookId:sec.notebookId};}
   if(nh){const nb=nh.closest('.notebook');return {mark:nh,cls:'drop-into',notebookId:nb.dataset.notebookId};}
+  if(pagesCol&&view==='pages'&&!pagesCol.classList.contains('browse')){
+   if(fb){const f=folderOf(doc,fb.dataset.folderId);if(!f||dragging.ids.includes(f.sectionId))return null;return {mark:fb,cls:'drop-into',asFolder:true,sectionId:f.sectionId,parentId:f.id};}
+   const cur=currentSection();if(dragging.ids.includes(cur.id))return null;return {mark:pagesCol,cls:'drop-into',asFolder:true,sectionId:cur.id};
+  }
   return null;
  }
  if(dragging.type==='notebook'){
@@ -809,18 +880,23 @@ navEl.addEventListener('drop',e=>{
  } else if(d.type==='folder'&&t.toSection){
   makeSectionFromFolder(d.id,t.notebookId,null);return;
  } else if(d.type==='folder'){
-  const movedPages=doc.pages.filter(x=>x.folderId===d.id).map(x=>x.id),fromSection=folderOf(doc,d.id)?.sectionId;
-  if(t.folderId){ // next to another folder: same place among the pages, just before / after it
-   const target=folderOf(doc,t.folderId);const before=t.cls==='drop-before'?t.folderId:nextOf(foldersIn(doc,t.sectionId),t.folderId);
-   moved=moveFolder(doc,d.id,t.sectionId,before);if(setFolderPlace(doc,d.id,target.before))moved=true;
-  } else if(t.pageId){ // next to a page in no folder
-   const loose=sortedPages(t.sectionId).filter(pg=>!pageFolder(doc,pg)),i=loose.findIndex(pg=>pg.id===t.pageId);
-   const anchor=t.cls==='drop-before'?t.pageId:(loose[i+1]?.id??'');
-   moved=moveFolder(doc,d.id,t.sectionId,null);if(setFolderPlace(doc,d.id,anchor))moved=true;
-  } else { // a section tab (other section) or the empty area: to the end of the list
-   moved=moveFolder(doc,d.id,t.sectionId,null);if(setFolderPlace(doc,d.id,''))moved=true;
+  const tree=folderTree(doc,d.id),movedPages=doc.pages.filter(x=>tree.has(x.folderId)).map(x=>x.id),fromSection=folderOf(doc,d.id)?.sectionId;
+  if(t.into){ // inside another folder, at its end
+   moved=putFolderInto(d.id,t.sectionId,t.into);
+  } else if(t.folderId){ // next to another folder: same level and place among the pages, just before / after it
+   const target=folderOf(doc,t.folderId),parent=folderParent(doc,target)?.id??null;
+   const before=t.cls==='drop-before'?t.folderId:nextOf(foldersUnder(doc,t.sectionId,parent),t.folderId);
+   moved=moveFolder(doc,d.id,t.sectionId,before);if(setFolderParent(doc,d.id,parent))moved=true;if(setFolderPlace(doc,d.id,target.before))moved=true;
+  } else if(t.pageId){ // next to a page, at that page's level
+   const level=sortedPages(t.sectionId).filter(pg=>(pageFolder(doc,pg)?.id??null)===t.parentId),i=level.findIndex(pg=>pg.id===t.pageId);
+   const anchor=t.cls==='drop-before'?t.pageId:(level[i+1]?.id??'');
+   moved=moveFolder(doc,d.id,t.sectionId,null);if(setFolderParent(doc,d.id,t.parentId))moved=true;if(setFolderPlace(doc,d.id,anchor))moved=true;
+  } else { // a section tab (other section) or the empty area: directly in the section, at the end of the list
+   moved=moveFolder(doc,d.id,t.sectionId,null);if(setFolderParent(doc,d.id,null))moved=true;if(setFolderPlace(doc,d.id,''))moved=true;
   }
   if(moved&&fromSection!==t.sectionId)touchPages(movedPages);
+ } else if(d.type==='section'&&t.asFolder){
+  putSectionsInto(ids,t.sectionId,t.parentId||null);return;
  } else if(d.type==='section'){
   const before=t.cls==='drop-into'?null:t.cls==='drop-before'?t.sectionId:nextOf(sectionsIn(doc,t.notebookId),t.sectionId);
   for(const id of ids)if(moveSection(doc,id,t.notebookId,before))moved=true;
@@ -851,7 +927,9 @@ $('new-category').onsubmit=e=>{
   renameSection(doc,mode.id,value||uniqueIn(sectionsIn(doc,sec.notebookId).map(x=>x.name)));close();changed();breadcrumb();renderPages();return;
  }
  if(mode.kind==='new-folder'){
-  const f=addFolder(doc,currentSection().id,value);if(!f)return;close();closedFolders.delete(f.id);changed();renderPages();message('フォルダ「'+f.name+'」を作りました。ページをドラッグして入れられます。');return;
+  const parent=mode.parentId?folderOf(doc,mode.parentId):null;
+  const f=addFolder(doc,parent?parent.sectionId:currentSection().id,value,parent?.id??null);if(!f)return;close();closedFolders.delete(f.id);
+  if(parent)for(const x of folderPath(doc,parent))closedFolders.delete(x.id);changed();renderPages();message('フォルダ「'+f.name+'」を作りました。ページをドラッグして入れられます。');return;
  }
  if(mode.kind==='rename-folder'){
   if(!renameFolder(doc,mode.id,value||'新しいフォルダ'))return;close();changed();breadcrumb();renderPages();return;
@@ -873,7 +951,7 @@ $('new-category').onsubmit=e=>{
  if(np&&mode.folderId&&setPageFolder(doc,np.id,mode.folderId)){closedFolders.delete(mode.folderId);changed(np);breadcrumb();renderPages();}
 };
 
-function breadcrumb(){const p=page(),sec=sectionOf(doc,p.sectionId),nb=sec&&notebookOf(doc,sec.notebookId),f=pageFolder(doc,p);$('breadcrumb').textContent=(nb?nb.name+' › ':'')+(sec?sec.name+' › ':'')+(f?f.name+' › ':'')+(p.title||'名称未設定');}
+function breadcrumb(){const p=page(),sec=sectionOf(doc,p.sectionId),nb=sec&&notebookOf(doc,sec.notebookId),f=pageFolder(doc,p);$('breadcrumb').textContent=(nb?nb.name+' › ':'')+(sec?sec.name+' › ':'')+folderPath(doc,f).map(x=>x.name+' › ').join('')+(p.title||'名称未設定');}
 function showPage() {
  settleLasso();
  activeBlock=null;editing=null;selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;ensureLayers(page());

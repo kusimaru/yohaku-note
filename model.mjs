@@ -196,6 +196,27 @@ export function setPageFolder(doc,pageId,folderId){
  if(folderId){const f=folderOf(doc,folderId);if(!f||f.sectionId!==p.sectionId)return false;if(p.folderId===folderId)return false;p.folderId=folderId;return true;}
  if(p.folderId===undefined)return false;delete p.folderId;return true;
 }
+// Where a folder sits among the pages that are in no folder: folder.before is the id of the page it is shown in
+// front of ('' = after the last page). Folders without the field (made before this existed) sit at the top.
+// The position is found through doc.pages order, so it stays put when that page later moves into a folder;
+// a folder whose page is gone goes to the end.
+export function setFolderPlace(doc,id,before){const f=folderOf(doc,id);if(!f)return false;const v=before==null?undefined:String(before);if(f.before===v)return false;if(v===undefined)delete f.before;else f.before=v;return true;}
+export function pageColumn(doc,sectionId,loosePages){
+ const folders=foldersIn(doc,sectionId),idx=new Map(doc.pages.map((p,i)=>[p.id,i]));
+ const slot=new Map(); // loose page index in loosePages -> folders before it; 'top' / 'end'
+ const top=[],end=[];
+ for(const f of folders){
+  if(f.before===undefined){top.push(f);continue;}
+  const a=f.before===''?undefined:idx.get(f.before);
+  if(a===undefined){end.push(f);continue;}
+  const at=loosePages.findIndex(p=>(idx.get(p.id)??-1)>=a);
+  if(at<0)end.push(f);else{if(!slot.has(at))slot.set(at,[]);slot.get(at).push(f);}
+ }
+ const out=top.map(f=>({folder:f}));
+ loosePages.forEach((p,i)=>{for(const f of slot.get(i)||[])out.push({folder:f});out.push({page:p});});
+ for(const f of end)out.push({folder:f});
+ return out;
+}
 // Reorder a folder (before folder `beforeId` in `sectionId`, or last) and/or move it with its pages to another section.
 export function moveFolder(doc,id,sectionId,beforeId=null){
  const f=folderOf(doc,id);if(!f||!sectionOf(doc,sectionId)||beforeId===id)return false;
@@ -269,7 +290,7 @@ function orderBy(items,baseIds,otherIds){
  const restPos=new Map(otherIds.map((id,i)=>[id,i]));rest.sort((a,b)=>(restPos.get(a.id)??1e9)-(restPos.get(b.id)??1e9));
  return [...items.filter(x=>pos.has(x.id)).sort((a,b)=>pos.get(a.id)-pos.get(b.id)),...rest];
 }
-const cleanFolder=x=>x&&typeof x.id==='string'&&x.id.length<=100&&typeof x.sectionId==='string'&&x.sectionId.length<=100&&typeof x.name==='string'&&x.name.trim()?{id:x.id,sectionId:x.sectionId,name:x.name.slice(0,60),updatedAt:Number.isFinite(x.updatedAt)?x.updatedAt:0}:null;
+const cleanFolder=x=>x&&typeof x.id==='string'&&x.id.length<=100&&typeof x.sectionId==='string'&&x.sectionId.length<=100&&typeof x.name==='string'&&x.name.trim()?{id:x.id,sectionId:x.sectionId,name:x.name.slice(0,60),...(typeof x.before==='string'&&x.before.length<=100?{before:x.before}:{}),updatedAt:Number.isFinite(x.updatedAt)?x.updatedAt:0}:null;
 export function structureSig(doc){return JSON.stringify([(doc.notebooks||[]).map(cleanNotebook),(doc.sections||[]).map(cleanSection),Object.entries(removedOf(doc)).sort(),doc.pages.map(p=>p.id),(doc.folders||[]).map(cleanFolder)]);}
 export function mergeStructure(doc,remote) {
  ensureStructure(doc);
@@ -332,6 +353,17 @@ export function renameSection(doc,id,name){const sec=sectionOf(doc,id),t=String(
 export function setSectionColor(doc,id,color){const sec=sectionOf(doc,id);if(!sec||!/^#[0-9a-f]{6}$/i.test(color||''))return false;sec.color=color.toLowerCase();return true;}
 export function setNotebookColor(doc,id,color){const nb=notebookOf(doc,id);if(!nb||!/^#[0-9a-f]{6}$/i.test(color||''))return false;nb.color=color.toLowerCase();return true;}
 // Move a page into `sectionId`, placed before page `beforeId` (same section) or at the end.
+// Turn a folder into a section of its own in `notebookId` (before section `beforeId`, or last). Its pages move with it
+// in their order; the folder itself goes away. Returns {section,pageIds} or null.
+export function folderToSection(doc,id,notebookId,beforeId=null){
+ const f=folderOf(doc,id);if(!f||!notebookOf(doc,notebookId))return null;
+ const sec=addSection(doc,notebookId,f.name);if(!sec)return null;
+ if(beforeId)moveSection(doc,sec.id,notebookId,beforeId);
+ const pageIds=doc.pages.filter(x=>x.folderId===id).map(x=>x.id);
+ for(const pid of pageIds)movePage(doc,pid,sec.id,null);
+ doc.folders=doc.folders.filter(x=>x.id!==id);
+ return {section:sec,pageIds};
+}
 export function movePage(doc,pageId,sectionId,beforeId=null) {
  const p=doc.pages.find(x=>x.id===pageId);if(!p||beforeId===pageId||!sectionOf(doc,sectionId))return false;
  const rest=doc.pages.filter(x=>x.id!==pageId);if(p.sectionId!==sectionId)delete p.folderId;p.sectionId=sectionId;
@@ -444,7 +476,7 @@ export function validateBackup(doc) {
  const checkSection=x=>{if(!x||typeof x.id!=='string'||x.id.length>100||secIds.has(x.id)||typeof x.notebookId!=='string'||x.notebookId.length>100||typeof x.name!=='string'||!x.name.trim()||x.name.length>60||!hex.test(x.color||''))bad();secIds.add(x.id);};
  if(doc.notebooks!==undefined){if(!Array.isArray(doc.notebooks)||doc.notebooks.length>100)bad();for(const n of doc.notebooks)checkNotebook(n);}
  if(doc.sections!==undefined){if(!Array.isArray(doc.sections)||doc.sections.length>500)bad();for(const x of doc.sections)checkSection(x);}
- if(doc.folders!==undefined){if(!Array.isArray(doc.folders)||doc.folders.length>1000)bad();const fIds=new Set();for(const f of doc.folders){if(!f||typeof f.id!=='string'||f.id.length>100||fIds.has(f.id)||typeof f.sectionId!=='string'||f.sectionId.length>100||typeof f.name!=='string'||!f.name.trim()||f.name.length>60)bad();fIds.add(f.id);}}
+ if(doc.folders!==undefined){if(!Array.isArray(doc.folders)||doc.folders.length>1000)bad();const fIds=new Set();for(const f of doc.folders){if(!f||typeof f.id!=='string'||f.id.length>100||fIds.has(f.id)||typeof f.sectionId!=='string'||f.sectionId.length>100||typeof f.name!=='string'||!f.name.trim()||f.name.length>60||(f.before!==undefined&&(typeof f.before!=='string'||f.before.length>100)))bad();fIds.add(f.id);}}
  const ids=new Set();let points=0,totalImages=0;
  const checkPage=p=>{
   if(!p||typeof p.id!=='string'||p.id.length>100||ids.has(p.id)||typeof p.title!=='string'||p.title.length>120||

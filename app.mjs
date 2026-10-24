@@ -1,4 +1,4 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, folderOf, foldersIn, pageFolder, addFolder, renameFolder, deleteFolder, setPageFolder, moveFolder, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
@@ -23,6 +23,10 @@ const collapsedNotebooks=new Set();let selectedSectionId=null,lastShownSectionId
 let multiMode=false;const multi={kind:null,ids:new Set(),anchor:null};
 // when set, the right column lists this notebook's sections instead of the current section's pages
 let browsingNotebookId=null;
+// folders the user folded (this device only)
+const closedFolders=new Set(),folderToggled=new Set();
+try{for(const id of JSON.parse(localStorage.getItem('yohaku-folders-closed')||'[]'))closedFolders.add(id);}catch{}
+const saveClosedFolders=()=>{try{localStorage.setItem('yohaku-folders-closed',JSON.stringify([...closedFolders].slice(-300)));}catch{}};
 // phone flow: notebooks › sections › pages, one level at a time in the drawer
 let browsingNotebooks=false;
 let pageSort='manual';try{pageSort=['manual','updated','name'].includes(localStorage.getItem('yohaku-page-sort'))?localStorage.getItem('yohaku-page-sort'):'manual';}catch{}
@@ -193,13 +197,28 @@ function renderPageList() {
  const cur=currentSection(),head=$('current-section');head.replaceChildren();head.style.setProperty('--sec',cur.color);
  const nb=notebookOf(doc,cur.notebookId);head.append(backButton('セクション',()=>{browsingNotebookId=cur.notebookId;renderPages();}),icon('section','sec-icon'),el('span','',(nb?nb.name+' › ':'')+cur.name));
  const list=sortedPages(cur.id),box=$('pages');box.replaceChildren();// the list is rebuilt from scratch (the sort button calls this directly)
- for(const pg of list){
+ const pageRow=(pg,into)=>{
   const button=el('button','page-button'+(pg.id===doc.activeId?' active':''));button.type='button';button.dataset.pageId=pg.id;button.draggable=true;button.setAttribute('aria-current',pg.id===doc.activeId?'page':'false');
   const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(selMark(),icon('page'),label);button.append(name);if(isSelected('page',pg.id))button.classList.add('selected');
   const sub=el('small','',new Date(pg.updatedAt).toLocaleDateString('ja-JP'));button.append(sub);
   button.onclick=e=>{if(wantsSelect(e)){toggleSelect('page',pg.id,e.shiftKey);return;}openPage(pg.id);};
-  const item=el('div','page-item');item.append(button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));box.append(item);
+  const item=el('div','page-item');item.append(button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));into.append(item);
+ };
+ // folders first (in their own order), each with its pages; then the pages that are in no folder
+ for(const f of foldersIn(doc,cur.id)){
+  const inside=list.filter(pg=>pg.folderId===f.id),open=!closedFolders.has(f.id)||inside.some(pg=>pg.id===doc.activeId&&!folderToggled.has(f.id));
+  const wrap=el('div','folder'+(open?'':' closed'));wrap.dataset.folderId=f.id;
+  const head=el('div','folder-item');
+  const fb=el('button','folder-button');fb.type='button';fb.draggable=true;fb.dataset.folderId=f.id;fb.setAttribute('aria-expanded',String(open));fb.title='クリックで開閉 / ページをここへドラッグで入れる / ドラッグで並べ替え';
+  fb.append(icon('chevron-down','chev'),icon('folder','folder-icon'),el('span','folder-name',f.name),el('small','folder-count',String(inside.length)));
+  fb.onclick=()=>{folderToggled.add(f.id);if(open)closedFolders.add(f.id);else closedFolders.delete(f.id);saveClosedFolders();renderPageList();};
+  const add=el('button','folder-add icon-only','');add.type='button';add.title='このフォルダにページを追加';add.setAttribute('aria-label','フォルダ「'+f.name+'」にページを追加');add.append(icon('plus'));
+  add.onclick=e=>{e.stopPropagation();showForm({kind:'new-page',folderId:f.id},'新しいページ（'+f.name+'）','','作成');};
+  head.append(fb,add,menuButton({type:'folder',id:f.id,label:f.name}));wrap.append(head);
+  if(open){const pages=el('div','folder-pages');for(const pg of inside)pageRow(pg,pages);if(!inside.length)pages.append(el('div','folder-empty','ページをここへドラッグして入れます'));wrap.append(pages);}
+  box.append(wrap);
  }
+ for(const pg of list)if(!pageFolder(doc,pg))pageRow(pg,box);
  if(!list.length)box.append(el('div','pages-empty','このセクションにはまだページがありません。「ページの追加」で作れます。'));
  $('page-count').textContent=list.length;
  const labels={manual:'手動（ドラッグ順）',updated:'更新日が新しい順',name:'名前順'};
@@ -222,7 +241,7 @@ $('page-section').onchange=e=>{
 // ---- item menu (rename / colour / delete) ----
 function menuButton(target) {
  const b=document.createElement('button');b.type='button';b.className='item-menu-button';b.append(icon('more'));b.draggable=false;
- const kind={page:'ページ',section:'セクション',notebook:'ノートブック'}[target.type];
+ const kind={page:'ページ',section:'セクション',notebook:'ノートブック',folder:'フォルダ'}[target.type];
  b.setAttribute('aria-label',kind+'「'+target.label+'」のメニュー');b.setAttribute('aria-haspopup','menu');
  b.onclick=e=>{e.stopPropagation();openMenu(target,b.getBoundingClientRect(),b.parentElement);};
  return b;
@@ -231,7 +250,7 @@ function openMenu(target,rect,holder) {
  closeMenu();menuTarget={...target,holder};holder?.classList.add('menu-open');
  const menu=$('item-menu');menu.hidden=false;
  const colors=$('menu-colors');colors.replaceChildren();
- if(target.type!=='page'){
+ if(target.type!=='page'&&target.type!=='folder'){
   const current=target.type==='section'?sectionOf(doc,target.id)?.color:notebookOf(doc,target.id)?.color;
   for(const c of SECTION_COLORS){const b=document.createElement('button');b.type='button';b.style.setProperty('--sec',c);b.title='色を変える';b.setAttribute('aria-label','色 '+c);if(c===current)b.classList.add('current');
    b.onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;if(t.type==='section')setSectionColor(doc,t.id,c);else setNotebookColor(doc,t.id,c);changed();renderPages();};colors.append(b);}
@@ -239,7 +258,7 @@ function openMenu(target,rect,holder) {
  } else colors.hidden=true;
  const left=Math.min(rect.left,innerWidth-menu.offsetWidth-8),top=rect.bottom+4+menu.offsetHeight>innerHeight?rect.top-menu.offsetHeight-4:rect.bottom+4;
  menu.style.left=Math.max(4,left)+'px';menu.style.top=Math.max(4,top)+'px';
- $('menu-delete-label').textContent=target.type==='page'?'ページをゴミ箱へ':target.type==='section'?'セクションをゴミ箱へ（中のページも）':'ノートブックをゴミ箱へ（中身ごと）';
+ $('menu-delete-label').textContent=target.type==='page'?'ページをゴミ箱へ':target.type==='folder'?'フォルダをやめる（中のページは残す）':target.type==='section'?'セクションをゴミ箱へ（中のページも）':'ノートブックをゴミ箱へ（中身ごと）';
  $('menu-delete').disabled=target.type==='notebook'&&doc.notebooks.length<2;
  $('menu-rename').focus();
 }
@@ -247,8 +266,9 @@ function closeMenu(){$('item-menu').hidden=true;menuTarget?.holder?.classList.re
 document.addEventListener('pointerdown',e=>{if(!$('item-menu').hidden&&!$('item-menu').contains(e.target))closeMenu();},{capture:true});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('item-menu').hidden)closeMenu();},{capture:true});
 document.querySelector('.sidebar').addEventListener('contextmenu',e=>{
- const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),st=t?.closest('.section-tab'),nb=t?.closest('.notebook-button');
+ const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),st=t?.closest('.section-tab'),nb=t?.closest('.notebook-button'),fbt=t?.closest('.folder-button');
  const at={left:e.clientX,top:e.clientY,bottom:e.clientY};
+ if(fbt){e.preventDefault();openMenu({type:'folder',id:fbt.dataset.folderId,label:folderOf(doc,fbt.dataset.folderId)?.name||''},at,fbt.parentElement);return;}
  if(pb){e.preventDefault();openMenu({type:'page',id:pb.dataset.pageId,label:pageById(pb.dataset.pageId)?.title||''},at,pb.parentElement);}
  else if(st){e.preventDefault();openMenu({type:'section',id:st.dataset.sectionId,label:sectionOf(doc,st.dataset.sectionId)?.name||''},at,st.parentElement);}
  else if(nb){e.preventDefault();openMenu({type:'notebook',id:nb.dataset.notebookId,label:notebookOf(doc,nb.dataset.notebookId)?.name||''},at,nb.parentElement);}
@@ -256,9 +276,11 @@ document.querySelector('.sidebar').addEventListener('contextmenu',e=>{
 $('menu-rename').onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;
  if(t.type==='page')showForm({kind:'rename-page',id:t.id},'ページの名前の変更',pageById(t.id)?.title||'','変更');
  else if(t.type==='section')showForm({kind:'rename-section',id:t.id},'セクションの名前の変更',sectionOf(doc,t.id)?.name||'','変更');
+ else if(t.type==='folder')showForm({kind:'rename-folder',id:t.id},'フォルダの名前の変更',folderOf(doc,t.id)?.name||'','変更');
  else showForm({kind:'rename-notebook',id:t.id},'ノートブックの名前の変更',notebookOf(doc,t.id)?.name||'','変更');
 };
 $('menu-delete').onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;
+ if(t.type==='folder'){const f=folderOf(doc,t.id),inIds=doc.pages.filter(x=>x.folderId===t.id).map(x=>x.id);const n=deleteFolder(doc,t.id);if(n===null)return;touchPages(inIds);changed();breadcrumb();renderPages();message('フォルダ「'+(f?.name||'')+'」をやめました。中のページ（'+n+' ページ）はそのまま残っています。');return;}
  finish();
  const entry=t.type==='page'?deletePage(doc,t.id):t.type==='section'?deleteSection(doc,t.id):deleteNotebook(doc,t.id);
  if(!entry){if(t.type==='notebook')message('最後のノートブックは削除できません。');return;}
@@ -271,7 +293,7 @@ function uniqueIn(names,base=DEFAULT_NAME){let name=base,n=2;while(names.include
 function showForm(mode,title,value,submitLabel) {
  formMode=mode;$('form-title').textContent=title;$('form-submit-label').textContent=submitLabel;
  const forPage=mode.kind==='rename-page'||mode.kind==='new-page';
- $('new-category-name').placeholder=(forPage?'ページの名前':mode.kind.includes('notebook')?'ノートブックの名前':'セクションの名前')+'（空欄なら「'+DEFAULT_NAME+'」）';$('new-category-name').maxLength=forPage?120:60;
+ $('new-category-name').placeholder=(forPage?'ページの名前':mode.kind.includes('notebook')?'ノートブックの名前':mode.kind.includes('folder')?'フォルダの名前':'セクションの名前')+'（空欄なら「'+(mode.kind.includes('folder')?'新しいフォルダ':DEFAULT_NAME)+'」）';$('new-category-name').maxLength=forPage?120:60;
  $('new-category').hidden=false;$('new-category-name').value=value;$('new-category-name').focus();$('new-category-name').select();
 }
 // ---- camera / recording / media blocks / transcription ----
@@ -484,7 +506,7 @@ function aiDocs(scope){
   if(scope==='section')return pg.sectionId===cur?.sectionId;
   if(scope==='notebook')return sectionOf(doc,pg.sectionId)?.notebookId===nb?.id;
   return true;
- }).map(pg=>{const s2=sectionOf(doc,pg.sectionId),n2=s2?notebookOf(doc,s2.notebookId):null;return {id:pg.id,title:pg.title||'名称未設定',where:[n2?.name,s2?.name].filter(Boolean).join(' › '),updatedAt:pg.updatedAt,text:pageText(pg)};}).filter(d=>d.text);
+ }).map(pg=>{const s2=sectionOf(doc,pg.sectionId),n2=s2?notebookOf(doc,s2.notebookId):null;return {id:pg.id,title:pg.title||'名称未設定',where:[n2?.name,s2?.name,pageFolder(doc,pg)?.name].filter(Boolean).join(' › '),updatedAt:pg.updatedAt,text:pageText(pg)};}).filter(d=>d.text);
 }
 const scopeLabel=v=>({all:'すべてのノート',notebook:'このノートブック',section:'このセクション',page:'このページ'})[v]||'すべてのノート';
 function renderAnswer(box,text,sources){
@@ -703,12 +725,20 @@ const navEl=document.querySelector('.sidebar');
 function clearDropMarks(){for(const x of navEl.querySelectorAll('.drop-before,.drop-after,.drop-into'))x.classList.remove('drop-before','drop-after','drop-into');}
 function dropTarget(e) {
  const t=e.target instanceof Element?e.target:null;if(!t||!dragging)return null;
- const pb=t.closest('.page-button'),st=t.closest('.section-tab'),nh=t.closest('.notebook-head'),pagesCol=t.closest('.nav-pages');
+ const pb=t.closest('.page-button'),st=t.closest('.section-tab'),nh=t.closest('.notebook-head'),pagesCol=t.closest('.nav-pages'),fb=t.closest('.folder-button'),fArea=t.closest('.folder');
  const half=(node)=>{const r=node.getBoundingClientRect();return e.clientY<r.top+r.height/2?'drop-before':'drop-after';};
- if(dragging.type==='page'){
-  if(pb){if(dragging.ids.includes(pb.dataset.pageId))return null;return {mark:pb,cls:half(pb),pageId:pb.dataset.pageId,sectionId:pageById(pb.dataset.pageId)?.sectionId};}
+ if(dragging.type==='folder'){
+  if(fb){if(fb.dataset.folderId===dragging.id)return null;const f=folderOf(doc,fb.dataset.folderId);return {mark:fb,cls:half(fb),folderId:f.id,sectionId:f.sectionId};}
   if(st)return {mark:st,cls:'drop-into',sectionId:st.dataset.sectionId};
-  if(pagesCol)return {mark:pagesCol,cls:'drop-into',sectionId:currentSection().id};
+  return null;
+ }
+ if(dragging.type==='page'){
+  // onto a folder: into it; onto a page: next to it, in that page's folder (or none); empty area: out of folders
+  if(fb)return {mark:fb,cls:'drop-into',sectionId:folderOf(doc,fb.dataset.folderId)?.sectionId,folderId:fb.dataset.folderId,intoFolder:true};
+  if(pb){if(dragging.ids.includes(pb.dataset.pageId))return null;const tp=pageById(pb.dataset.pageId);return {mark:pb,cls:half(pb),pageId:pb.dataset.pageId,sectionId:tp?.sectionId,folderId:pageFolder(doc,tp)?.id||null,intoFolder:true};}
+  if(fArea){const f=folderOf(doc,fArea.dataset.folderId);if(f)return {mark:fArea,cls:'drop-into',sectionId:f.sectionId,folderId:f.id,intoFolder:true};}
+  if(st)return {mark:st,cls:'drop-into',sectionId:st.dataset.sectionId};
+  if(pagesCol)return {mark:pagesCol,cls:'drop-into',sectionId:currentSection().id,folderId:null,intoFolder:true};
   return null;
  }
  if(dragging.type==='section'){
@@ -723,7 +753,8 @@ function dropTarget(e) {
  return null;
 }
 navEl.addEventListener('dragstart',e=>{
- const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),st=t?.closest('.section-tab'),nb=t?.closest('.notebook-button');
+ const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),st=t?.closest('.section-tab'),nb=t?.closest('.notebook-button'),fb=t?.closest('.folder-button');
+ if(fb){dragging={type:'folder',id:fb.dataset.folderId,ids:[fb.dataset.folderId]};fb.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain','folder');}catch{}return;}
  if(pb){dragging={type:'page',id:pb.dataset.pageId};pb.classList.add('dragging');}
  else if(st){dragging={type:'section',id:st.dataset.sectionId};st.classList.add('dragging');}
  else if(nb){dragging={type:'notebook',id:nb.dataset.notebookId};nb.classList.add('dragging');}
@@ -747,7 +778,13 @@ navEl.addEventListener('drop',e=>{
  if(d.type==='page'){
   const before=t.cls==='drop-into'?null:t.cls==='drop-before'?t.pageId:nextOf(pagesIn(doc,t.sectionId),t.pageId);
   for(const id of ids)if(movePage(doc,id,t.sectionId,before))moved=true;
+  if(t.intoFolder)for(const id of ids)if(setPageFolder(doc,id,t.folderId))moved=true; // section tab drops leave folderId as movePage set it
+  if(t.folderId)closedFolders.delete(t.folderId);
   if(moved){touchPages(ids);if(ids.includes(doc.activeId)){selectedSectionId=null;breadcrumb();}}
+ } else if(d.type==='folder'){
+  const before=t.cls==='drop-into'?null:t.cls==='drop-before'?t.folderId:nextOf(foldersIn(doc,t.sectionId),t.folderId);
+  const movedPages=doc.pages.filter(x=>x.folderId===d.id).map(x=>x.id);
+  moved=moveFolder(doc,d.id,t.sectionId,before);if(moved)touchPages(movedPages);
  } else if(d.type==='section'){
   const before=t.cls==='drop-into'?null:t.cls==='drop-before'?t.sectionId:nextOf(sectionsIn(doc,t.notebookId),t.sectionId);
   for(const id of ids)if(moveSection(doc,id,t.notebookId,before))moved=true;
@@ -760,6 +797,7 @@ navEl.addEventListener('drop',e=>{
 });
 // ---- forms: new page / section / notebook, renames ----
 $('add-notebook').onclick=()=>showForm({kind:'new-notebook'},'新しいノートブック','','作成');
+$('add-folder').onclick=()=>showForm({kind:'new-folder'},'新しいフォルダ（'+currentSection().name+'）','','作成');
 $('new-category-cancel').onclick=()=>{$('new-category').hidden=true;formMode=null;};
 function createPageIn(sectionId,title) {
  if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return null;}
@@ -776,6 +814,12 @@ $('new-category').onsubmit=e=>{
   const sec=sectionOf(doc,mode.id);if(!sec)return;
   renameSection(doc,mode.id,value||uniqueIn(sectionsIn(doc,sec.notebookId).map(x=>x.name)));close();changed();breadcrumb();renderPages();return;
  }
+ if(mode.kind==='new-folder'){
+  const f=addFolder(doc,currentSection().id,value);if(!f)return;close();closedFolders.delete(f.id);changed();renderPages();message('フォルダ「'+f.name+'」を作りました。ページをドラッグして入れられます。');return;
+ }
+ if(mode.kind==='rename-folder'){
+  if(!renameFolder(doc,mode.id,value||'新しいフォルダ'))return;close();changed();breadcrumb();renderPages();return;
+ }
  if(mode.kind==='rename-notebook'){
   renameNotebook(doc,mode.id,value||uniqueIn(doc.notebooks.map(x=>x.name)));close();changed();breadcrumb();renderPages();return;
  }
@@ -788,11 +832,12 @@ $('new-category').onsubmit=e=>{
   const nb=addNotebook(doc,value||uniqueIn(doc.notebooks.map(x=>x.name)));close();
   const sec=addSection(doc,nb.id,'新しいセクション 1');createPageIn(sec.id,DEFAULT_NAME);return;
  }
- // new page in the section shown in the page column
- close();createPageIn(currentSection().id,value||DEFAULT_NAME);
+ // new page in the section shown in the page column (inside a folder when made from the folder's ＋)
+ close();const np=createPageIn(currentSection().id,value||DEFAULT_NAME);
+ if(np&&mode.folderId&&setPageFolder(doc,np.id,mode.folderId)){closedFolders.delete(mode.folderId);changed(np);breadcrumb();renderPages();}
 };
 
-function breadcrumb(){const p=page(),sec=sectionOf(doc,p.sectionId),nb=sec&&notebookOf(doc,sec.notebookId);$('breadcrumb').textContent=(nb?nb.name+' › ':'')+(sec?sec.name+' › ':'')+(p.title||'名称未設定');}
+function breadcrumb(){const p=page(),sec=sectionOf(doc,p.sectionId),nb=sec&&notebookOf(doc,sec.notebookId),f=pageFolder(doc,p);$('breadcrumb').textContent=(nb?nb.name+' › ':'')+(sec?sec.name+' › ':'')+(f?f.name+' › ':'')+(p.title||'名称未設定');}
 function showPage() {
  settleLasso();
  activeBlock=null;editing=null;selection={strokes:new Set(),blocks:new Set()};selectionLasso=null;ensureLayers(page());

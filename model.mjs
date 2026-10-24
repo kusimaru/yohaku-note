@@ -173,6 +173,40 @@ export const notebookOf=(doc,id)=>(doc.notebooks||[]).find(n=>n.id===id);
 export const sectionOf=(doc,id)=>(doc.sections||[]).find(s=>s.id===id);
 export const sectionsIn=(doc,notebookId)=>(doc.sections||[]).filter(s=>s.notebookId===notebookId);
 export const pagesIn=(doc,sectionId)=>doc.pages.filter(p=>p.sectionId===sectionId);
+// ---------- folders: an optional grouping of pages inside one section (page.folderId) ----------
+export const folderOf=(doc,id)=>id?(doc.folders||[]).find(f=>f.id===id):undefined;
+export const foldersIn=(doc,sectionId)=>(doc.folders||[]).filter(f=>f.sectionId===sectionId);
+// the folder a page is shown in (only when that folder lives in the page's own section)
+export const pageFolder=(doc,p)=>{const f=folderOf(doc,p?.folderId);return f&&f.sectionId===p.sectionId?f:null;};
+export function addFolder(doc,sectionId,name){
+ ensureStructure(doc);if(!sectionOf(doc,sectionId))return null;
+ const f={id:crypto.randomUUID(),sectionId,name:cleanName(name||uniqueName(foldersIn(doc,sectionId).map(x=>x.name),'新しいフォルダ'),'新しいフォルダ')};
+ doc.folders.push(f);return f;
+}
+export function renameFolder(doc,id,name){const f=folderOf(doc,id),t=String(name??'').trim();if(!f||!t||t.length>60)return null;f.name=t;return t;}
+// Remove a folder; its pages stay in the section (returns how many pages were in it).
+export function deleteFolder(doc,id){
+ const f=folderOf(doc,id);if(!f)return null;let n=0;
+ for(const p of doc.pages)if(p.folderId===id){delete p.folderId;n++;}
+ doc.folders=doc.folders.filter(x=>x.id!==id);return n;
+}
+// Put a page into a folder (or take it out with folderId null). The folder must be in the page's section.
+export function setPageFolder(doc,pageId,folderId){
+ const p=doc.pages.find(x=>x.id===pageId);if(!p)return false;
+ if(folderId){const f=folderOf(doc,folderId);if(!f||f.sectionId!==p.sectionId)return false;if(p.folderId===folderId)return false;p.folderId=folderId;return true;}
+ if(p.folderId===undefined)return false;delete p.folderId;return true;
+}
+// Reorder a folder (before folder `beforeId` in `sectionId`, or last) and/or move it with its pages to another section.
+export function moveFolder(doc,id,sectionId,beforeId=null){
+ const f=folderOf(doc,id);if(!f||!sectionOf(doc,sectionId)||beforeId===id)return false;
+ const from=f.sectionId;
+ const rest=doc.folders.filter(x=>x.id!==id);f.sectionId=sectionId;
+ let index=beforeId?rest.findIndex(x=>x.id===beforeId&&x.sectionId===sectionId):-1;
+ if(index<0){index=rest.length;for(let i=rest.length-1;i>=0;i--)if(rest[i].sectionId===sectionId){index=i+1;break;}}
+ rest.splice(index,0,f);doc.folders=rest;
+ if(from!==sectionId)for(const p of doc.pages.filter(x=>x.folderId===id&&x.sectionId===from)){movePage(doc,p.id,sectionId,null);p.folderId=id;}
+ return true;
+}
 // Fill in the structure: a default notebook, sections migrated from the old category names
 // (deterministic ids so two devices migrate the same way), and every page inside a section.
 // A page that points at a section this device does not know yet gets a placeholder section
@@ -181,6 +215,7 @@ export function ensureStructure(doc) {
  let changed=false;
  if(!Array.isArray(doc.notebooks)||!doc.notebooks.length){doc.notebooks=[{id:DEFAULT_NOTEBOOK_ID,name:'わたしのノート',color:pickColor(0)}];changed=true;}
  if(!Array.isArray(doc.sections)){doc.sections=[];changed=true;}
+ if(!Array.isArray(doc.folders)){doc.folders=[];changed=true;}
  const home=doc.notebooks[0].id,nbIds=new Set(doc.notebooks.map(n=>n.id));
  for(const s of doc.sections)if(!nbIds.has(s.notebookId)){doc.notebooks.push({id:s.notebookId,name:'同期待ち',color:pickColor(doc.notebooks.length),placeholder:true,updatedAt:0});nbIds.add(s.notebookId);changed=true;}
  const byId=id=>doc.sections.find(s=>s.id===id);
@@ -234,7 +269,8 @@ function orderBy(items,baseIds,otherIds){
  const restPos=new Map(otherIds.map((id,i)=>[id,i]));rest.sort((a,b)=>(restPos.get(a.id)??1e9)-(restPos.get(b.id)??1e9));
  return [...items.filter(x=>pos.has(x.id)).sort((a,b)=>pos.get(a.id)-pos.get(b.id)),...rest];
 }
-export function structureSig(doc){return JSON.stringify([(doc.notebooks||[]).map(cleanNotebook),(doc.sections||[]).map(cleanSection),Object.entries(removedOf(doc)).sort(),doc.pages.map(p=>p.id)]);}
+const cleanFolder=x=>x&&typeof x.id==='string'&&x.id.length<=100&&typeof x.sectionId==='string'&&x.sectionId.length<=100&&typeof x.name==='string'&&x.name.trim()?{id:x.id,sectionId:x.sectionId,name:x.name.slice(0,60),updatedAt:Number.isFinite(x.updatedAt)?x.updatedAt:0}:null;
+export function structureSig(doc){return JSON.stringify([(doc.notebooks||[]).map(cleanNotebook),(doc.sections||[]).map(cleanSection),Object.entries(removedOf(doc)).sort(),doc.pages.map(p=>p.id),(doc.folders||[]).map(cleanFolder)]);}
 export function mergeStructure(doc,remote) {
  ensureStructure(doc);
  const before=structureSig(doc);
@@ -244,19 +280,23 @@ export function mergeStructure(doc,remote) {
  for(const [id,at] of Object.entries(rRemoved))if(!(removed[id]>=at))removed[id]=at;
  const localNb=(doc.notebooks||[]).map(cleanNotebook).filter(Boolean),localSec=(doc.sections||[]).map(cleanSection).filter(Boolean);
  let notebooks=mergeList(localNb,rNotebooks,removed),sections=mergeList(localSec,rSections,removed);
+ // folders: remote lists from older versions have none, which simply keeps ours (they are sent back)
+ const rFolders=(Array.isArray(remote.folders)?remote.folders:[]).map(cleanFolder).filter(Boolean),localFo=(doc.folders||[]).map(cleanFolder).filter(Boolean);
+ let folders=mergeList(localFo,rFolders,removed);
  const lo=doc.orderUpdatedAt||0,ro=remote.orderUpdatedAt||0;
  const rOrder=Array.isArray(remote.order)?remote.order.filter(x=>typeof x==='string'):[];
  const remoteWins=ro>lo||(ro===lo&&JSON.stringify([rNotebooks.map(x=>x.id),rSections.map(x=>x.id),rOrder])>JSON.stringify([localNb.map(x=>x.id),localSec.map(x=>x.id),doc.pages.map(x=>x.id)]));
  const base=remoteWins?{nb:rNotebooks.map(x=>x.id),sec:rSections.map(x=>x.id),pg:rOrder}:{nb:localNb.map(x=>x.id),sec:localSec.map(x=>x.id),pg:doc.pages.map(x=>x.id)};
  const other=remoteWins?{nb:localNb.map(x=>x.id),sec:localSec.map(x=>x.id),pg:doc.pages.map(x=>x.id)}:{nb:rNotebooks.map(x=>x.id),sec:rSections.map(x=>x.id),pg:rOrder};
  notebooks=orderBy(notebooks,base.nb,other.nb);sections=orderBy(sections,base.sec,other.sec);
- doc.notebooks=notebooks;doc.sections=sections;doc.removed=removed;doc.orderUpdatedAt=Math.max(lo,ro);
+ folders=orderBy(folders,(remoteWins?rFolders:localFo).map(x=>x.id),(remoteWins?localFo:rFolders).map(x=>x.id));
+ doc.notebooks=notebooks;doc.sections=sections;doc.folders=folders;doc.removed=removed;doc.orderUpdatedAt=Math.max(lo,ro);
  doc.pages=orderBy(doc.pages,base.pg,other.pg);
  // keep the tombstone list bounded
  const entries=Object.entries(removed);if(entries.length>1000){entries.sort((a,b)=>b[1]-a[1]);doc.removed=Object.fromEntries(entries.slice(0,1000));}
  ensureStructure(doc);
  const after=structureSig(doc);
- const remoteSig=JSON.stringify([rNotebooks,rSections,Object.entries(rRemoved).sort(),rOrder]);
+ const remoteSig=JSON.stringify([rNotebooks,rSections,Object.entries(rRemoved).sort(),rOrder,rFolders]);
  return {localChanged:before!==after,remoteDiffers:after!==remoteSig};
 }
 // Called after local edits: stamps items that changed since `prev` (a snapshot from a previous call), records tombstones
@@ -264,18 +304,18 @@ export function mergeStructure(doc,remote) {
 export function observeStructure(doc,prev,now=Date.now()) {
  ensureStructure(doc);
  const items=new Map();let changed=false;
- for(const x of [...doc.notebooks,...doc.sections]){
+ for(const x of [...doc.notebooks,...doc.sections,...doc.folders]){
   const key=itemKey(x),old=prev?prev.items.get(x.id):undefined;
   if(old===undefined){if(prev&&!x.placeholder){x.updatedAt=now;changed=true;}}
   else if(old!==key){x.updatedAt=now;delete x.placeholder;changed=true;}
   items.set(x.id,itemKey(x));
  }
  if(prev){const removed=removedOf(doc);for(const id of prev.items.keys())if(!items.has(id)){removed[id]=now;changed=true;doc.removed=removed;}}
- const order=JSON.stringify([doc.notebooks.map(x=>x.id),doc.sections.map(x=>x.id),doc.pages.map(x=>x.id)]);
+ const order=JSON.stringify([doc.notebooks.map(x=>x.id),doc.sections.map(x=>x.id),doc.pages.map(x=>x.id),doc.folders.map(x=>x.id)]);
  if(prev&&prev.order!==order){doc.orderUpdatedAt=now;changed=true;}
  return {snapshot:{items,order},changed};
 }
-export function structureMeta(doc){return {notebooks:(doc.notebooks||[]).map(cleanNotebook).filter(Boolean),sections:(doc.sections||[]).map(cleanSection).filter(Boolean),removed:Object.entries(removedOf(doc)).map(([id,at])=>({id,at})),order:doc.pages.map(p=>p.id),orderUpdatedAt:doc.orderUpdatedAt||0,updatedAt:doc.metaUpdatedAt||Date.now()};}
+export function structureMeta(doc){return {notebooks:(doc.notebooks||[]).map(cleanNotebook).filter(Boolean),sections:(doc.sections||[]).map(cleanSection).filter(Boolean),folders:(doc.folders||[]).map(cleanFolder).filter(Boolean),removed:Object.entries(removedOf(doc)).map(([id,at])=>({id,at})),order:doc.pages.map(p=>p.id),orderUpdatedAt:doc.orderUpdatedAt||0,updatedAt:doc.metaUpdatedAt||Date.now()};}
 export function addNotebook(doc,name) {
  ensureStructure(doc);
  const nb=newNotebook(name||uniqueName(doc.notebooks.map(n=>n.name),'新しいノートブック'),pickColor(doc.notebooks.length));
@@ -294,7 +334,7 @@ export function setNotebookColor(doc,id,color){const nb=notebookOf(doc,id);if(!n
 // Move a page into `sectionId`, placed before page `beforeId` (same section) or at the end.
 export function movePage(doc,pageId,sectionId,beforeId=null) {
  const p=doc.pages.find(x=>x.id===pageId);if(!p||beforeId===pageId||!sectionOf(doc,sectionId))return false;
- const rest=doc.pages.filter(x=>x.id!==pageId);p.sectionId=sectionId;
+ const rest=doc.pages.filter(x=>x.id!==pageId);if(p.sectionId!==sectionId)delete p.folderId;p.sectionId=sectionId;
  let index=beforeId?rest.findIndex(x=>x.id===beforeId&&x.sectionId===sectionId):-1;
  if(index<0){index=rest.length;for(let i=rest.length-1;i>=0;i--)if(rest[i].sectionId===sectionId){index=i+1;break;}}
  rest.splice(index,0,p);doc.pages=rest;return true;
@@ -378,6 +418,7 @@ export function mergeNotebook(doc,incoming) {
  ensureStructure(doc);ensureStructure(incoming);
  for(const nb of incoming.notebooks)if(!notebookOf(doc,nb.id))doc.notebooks.push({...nb});
  for(const sec of incoming.sections)if(!sectionOf(doc,sec.id))doc.sections.push({...sec});
+ for(const f of incoming.folders||[])if(!folderOf(doc,f.id))doc.folders.push({...f});
  const trashIds=new Set((doc.trash||[]).flatMap(t=>t.pages.map(p=>p.id)));
  for(const p of incoming.pages){
   const i=doc.pages.findIndex(x=>x.id===p.id);
@@ -403,12 +444,14 @@ export function validateBackup(doc) {
  const checkSection=x=>{if(!x||typeof x.id!=='string'||x.id.length>100||secIds.has(x.id)||typeof x.notebookId!=='string'||x.notebookId.length>100||typeof x.name!=='string'||!x.name.trim()||x.name.length>60||!hex.test(x.color||''))bad();secIds.add(x.id);};
  if(doc.notebooks!==undefined){if(!Array.isArray(doc.notebooks)||doc.notebooks.length>100)bad();for(const n of doc.notebooks)checkNotebook(n);}
  if(doc.sections!==undefined){if(!Array.isArray(doc.sections)||doc.sections.length>500)bad();for(const x of doc.sections)checkSection(x);}
+ if(doc.folders!==undefined){if(!Array.isArray(doc.folders)||doc.folders.length>1000)bad();const fIds=new Set();for(const f of doc.folders){if(!f||typeof f.id!=='string'||f.id.length>100||fIds.has(f.id)||typeof f.sectionId!=='string'||f.sectionId.length>100||typeof f.name!=='string'||!f.name.trim()||f.name.length>60)bad();fIds.add(f.id);}}
  const ids=new Set();let points=0,totalImages=0;
  const checkPage=p=>{
   if(!p||typeof p.id!=='string'||p.id.length>100||ids.has(p.id)||typeof p.title!=='string'||p.title.length>120||
    !Number.isFinite(p.updatedAt)||!Array.isArray(p.strokes)||p.strokes.length>50000)bad();
   if(p.category!==undefined&&(typeof p.category!=='string'||p.category.length>60))bad();
   if(p.sectionId!==undefined&&(typeof p.sectionId!=='string'||!p.sectionId||p.sectionId.length>100))bad();
+  if(p.folderId!==undefined&&(typeof p.folderId!=='string'||!p.folderId||p.folderId.length>100))bad();
   ids.add(p.id);
   const height=doc.version===1?PAGE_HEIGHT:p.height,width=p.width===undefined?PAGE_WIDTH:p.width;
   if(!Number.isFinite(height)||height<760||height>MAX_HEIGHT)bad();

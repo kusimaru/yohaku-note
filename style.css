@@ -967,3 +967,23 @@ body.nav-collapsed .rail-splitter{display:none}
 body.resizing,body.resizing *{cursor:col-resize !important;user-select:none !important;-webkit-user-select:none !important}
 @media(max-width:1180px){.rail-splitter{left:calc(min(var(--rail),94vw) - 7px)}body:not(.nav-open) .rail-splitter{display:none}}
 @media(max-width:700px){.col-splitter,.rail-splitter{display:none}}
+
+/* ---------- folders in the page column ---------- */
+.folder{margin:2px 0}
+.folder-item{position:relative;display:flex;align-items:center}
+.folder-button{flex:1;min-width:0;display:flex;align-items:center;gap:8px;justify-content:flex-start;text-align:left;background:transparent;border-color:transparent;border-radius:8px;padding:10px 84px 10px 6px;min-height:var(--ui-btn);font-weight:700;color:#2b3f38}
+.folder-button:hover:not(:disabled){background:#e9eee6}
+.folder-button .chev{width:16px;height:16px;color:#7b8a80;transition:transform .15s;flex:none}
+.folder.closed .folder-button .chev{transform:rotate(-90deg)}
+.folder-button .folder-icon{width:var(--ui-icon);height:var(--ui-icon);color:#b98a2e;flex:none}
+.folder-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.folder-count{flex:none;font-weight:400;font-size:var(--ui-fs-sm);color:#8a948b;background:#eef1ec;border-radius:10px;padding:0 7px}
+body .folder-add{position:absolute;right:44px;top:50%;transform:translateY(-50%);width:34px;height:34px;min-height:34px;padding:0;background:transparent;border-color:transparent;color:#5a3ea6}
+body .folder-add:hover{background:#ece8f8}
+.folder-item .item-menu-button{top:50%;transform:translateY(-50%)}
+.folder-pages{margin:0 0 4px 16px;padding-left:8px;border-left:2px solid #e2d3b0}
+.folder-empty{font-size:var(--ui-fs-sm);color:#8a948b;padding:8px 6px}
+.folder-button.drop-into,.folder.drop-into{outline:2px dashed #4268b0;outline-offset:-2px;border-radius:8px;background:#eef3fb}
+.folder-button.drop-before{box-shadow:0 -3px 0 0 #4268b0}
+.folder-button.drop-after{box-shadow:0 3px 0 0 #4268b0}
+.folder-button.dragging{opacity:.4}

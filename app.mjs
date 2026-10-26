@@ -2628,7 +2628,7 @@ function initializePresentation(){
  const zoomFactor=()=>zoomMode==='fit'?null:customZoom;
  sizePaper=()=>{
   recallSectionZoom();
-  const z=zoomFactor(),width=pw(page());
+  const z=quickMemo?null:zoomFactor(),width=pw(page()); // すぐメモ: always the whole screen width, whatever zoom the section remembers
   paper.style.width=z===null?(width===W?'100%':Math.round(vp.clientWidth*width/W)+'px'):(width*z)+'px';
   updateZoomUi(z); // the slider shows the effective factor, also after page switches and window resizes
  };

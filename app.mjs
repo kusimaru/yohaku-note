@@ -30,6 +30,7 @@ const saveClosedFolders=()=>{try{localStorage.setItem('yohaku-folders-closed',JS
 // phone flow: notebooks › sections › pages, one level at a time in the drawer
 let browsingNotebooks=false;
 let pageSort='manual';try{pageSort=['manual','updated','name'].includes(localStorage.getItem('yohaku-page-sort'))?localStorage.getItem('yohaku-page-sort'):'manual';}catch{}
+let quickMemo=null; // すぐメモ in progress: {pageId, prevId, prevSection, prevTool, fullscreen}
 let dirty=false,saving=false,revision=0,saveFailed=false,lastInkEnd=-1e9,editing=null,lastPaperWidth=0;
 const histories=new Map();
 const page=()=>doc.pages.find(p=>p.id===doc.activeId);
@@ -86,6 +87,7 @@ function commit(before,p=page()) {
 }
 function syncHistory() {
  const h=historyFor(doc.activeId);$('undo').disabled=!ready||h.undo.length===0;$('redo').disabled=!ready||h.redo.length===0;
+ if(quickMemo)syncQuickBar();
 }
 // ---- navigation: notebooks › sections | pages ----
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
@@ -911,6 +913,53 @@ navEl.addEventListener('drop',e=>{
 $('add-notebook').onclick=()=>showForm({kind:'new-notebook'},'新しいノートブック','','作成');
 $('add-folder').onclick=()=>showForm({kind:'new-folder'},'新しいフォルダ（'+currentSection().name+'）','','作成');
 $('new-category-cancel').onclick=()=>{$('new-category').hidden=true;formMode=null;};
+// ---- すぐメモ: a new page in the 「メモ」 section, shown as a full-screen blank sheet with only pen tools.
+// 「終わる」 (or Esc / leaving full screen) goes back to the page that was open; an untouched memo is not kept.
+function memoSection(){
+ const cur=currentSection(),named=doc.sections.filter(x=>x.name.trim()==='メモ');
+ return named.find(x=>x.notebookId===cur.notebookId)||named[0]||addSection(doc,cur.notebookId,'メモ');
+}
+function syncQuickBar(){
+ $('qm-pen').setAttribute('aria-pressed',String(tool==='pen'));$('qm-eraser').setAttribute('aria-pressed',String(tool==='eraser'));
+ for(const b of document.querySelectorAll('.qm-color'))b.setAttribute('aria-pressed',String(b.dataset.color.toLowerCase()===color.toLowerCase()&&tool!=='eraser'));
+ $('qm-undo').disabled=$('undo').disabled;
+}
+function enterQuickMemo(){
+ if(!ready||quickMemo)return;
+ if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return;}
+ finish();closeMenu();
+ const sec=memoSection(),when=new Date().toLocaleString('ja-JP',{year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+ const p=newPage('メモ '+when,sec.id);p.blocks=[];doc.pages.push(p);
+ quickMemo={pageId:p.id,prevId:doc.activeId,prevSection:selectedSectionId,prevTool:tool,fullscreen:false};
+ doc.activeId=p.id;selectedSectionId=null;
+ document.body.classList.add('quick-memo');document.body.classList.remove('nav-open');$('quick-bar').hidden=false;
+ showPage();if(tool!=='pen')chooseTool('pen');
+ growPage(p,Math.ceil(innerHeight/(scale||1))+40); // the sheet covers the whole screen from the start
+ scrollTo(0,0);changed(p);syncQuickBar();
+ const fs=document.documentElement.requestFullscreen?.({navigationUI:'hide'});
+ if(fs&&fs.then)fs.then(()=>{if(quickMemo)quickMemo.fullscreen=true;},()=>{});
+}
+function exitQuickMemo(){
+ const q=quickMemo;if(!q)return;finish();quickMemo=null;
+ document.body.classList.remove('quick-memo');$('quick-bar').hidden=true;
+ if(document.fullscreenElement)document.exitFullscreen?.().catch(()=>{});
+ const p=pageById(q.pageId),empty=!p||(!p.strokes.length&&p.blocks.every(b=>b.type==='text'&&!String(b.text||'').trim()&&!(b.runs||[]).some(r=>String(r.text||'').trim())));
+ if(p&&empty){const e=deletePage(doc,p.id);if(e)purgeTrash(doc,e.id);histories.delete(p.id);}
+ if(pageById(q.prevId))doc.activeId=q.prevId;
+ selectedSectionId=q.prevSection&&sectionOf(doc,q.prevSection)?q.prevSection:null;
+ if(q.prevTool!=='pen')chooseTool(q.prevTool);
+ showPage();changed();
+ if(empty)message('何も書かなかったので、メモは保存しませんでした。');
+ else{const sec=sectionOf(doc,p.sectionId);message('「'+p.title+'」を「'+(sec?.name||'メモ')+'」セクションに保存しました。');}
+}
+$('quick-memo').onclick=enterQuickMemo;
+$('qm-done').onclick=exitQuickMemo;
+$('qm-pen').onclick=()=>{chooseTool('pen');syncQuickBar();};
+$('qm-eraser').onclick=()=>{chooseTool('eraser');syncQuickBar();};
+$('qm-undo').onclick=()=>{$('undo').click();syncQuickBar();};
+for(const b of document.querySelectorAll('.qm-color'))b.onclick=()=>{if(tool!=='pen')chooseTool('pen');document.querySelector('.toolbar .swatch[data-color="'+b.dataset.color+'"]')?.click();syncQuickBar();};
+document.addEventListener('keydown',e=>{if(quickMemo&&e.key==='Escape'){e.preventDefault();exitQuickMemo();}},{capture:true});
+document.addEventListener('fullscreenchange',()=>{if(quickMemo?.fullscreen&&!document.fullscreenElement)exitQuickMemo();});
 function createPageIn(sectionId,title) {
  if(doc.pages.length>=500){message('試作品では500ページまで作れます。');return null;}
  finish();const p=newPage(title,sectionId);doc.pages.push(p);doc.activeId=p.id;selectedSectionId=null;showPage();changed();return p;

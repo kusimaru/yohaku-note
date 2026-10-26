@@ -996,3 +996,26 @@ body .folder-add:hover{background:#ece8f8}
 .folder-pages .folder-pages{margin-left:8px;padding-left:6px}
 .folder-pages .folder-button{gap:5px;padding-left:2px}
 .folder-button .folder-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- すぐメモ: the whole screen becomes a blank sheet for the pen ---------- */
+.quick-memo-btn{font-weight:700;color:#2f5a46;border-color:#9cc3ad;background:#eef7f1}
+@media(max-width:700px){#quick-memo .lbl{display:none}#quick-memo{padding:8px}}
+body.quick-memo{background:#fff}
+body.quick-memo .sidebar,body.quick-memo .topbar,body.quick-memo .rail-splitter,body.quick-memo #rail-splitter,body.quick-memo #nav-backdrop,
+body.quick-memo #ai-panel,body.quick-memo #layer-panel,body.quick-memo .workspace>:not(#paper-viewport){display:none!important}
+body.quick-memo .app{padding-left:0}
+body.quick-memo .workspace{max-width:none;padding:0;margin:0}
+body.quick-memo .paper{border:0;border-radius:0;box-shadow:none}
+body.quick-memo #empty-hint{display:none!important}
+.quick-bar{position:fixed;top:10px;right:12px;z-index:120;display:flex;align-items:center;gap:8px;padding:8px;background:#ffffffeb;border:1px solid #d7e0d9;border-radius:14px;box-shadow:0 8px 26px #00000022;backdrop-filter:blur(8px)}
+.quick-bar[hidden]{display:none}
+.quick-bar button{min-height:48px;font-size:16px;padding:0 14px}
+.quick-bar button.icon-only{min-width:48px;padding:0}
+.quick-bar button[aria-pressed="true"]{background:#2f5a46;color:#fff;border-color:#2f5a46}
+.quick-bar #qm-done{font-weight:700}
+.qm-colors{display:flex;gap:6px;padding:0 4px}
+.qm-color{width:34px;min-height:34px!important;height:34px;padding:0!important;border-radius:50%;background:var(--swatch);border:2px solid #fff;box-shadow:0 0 0 1px #c9d3cc}
+.qm-color[aria-pressed="true"]{box-shadow:0 0 0 3px #2f5a46}
+@media(max-width:700px){.quick-bar{left:8px;right:8px;top:8px;justify-content:space-between;flex-wrap:wrap}.quick-bar button{padding:0 10px}}
+body.quick-memo #paper-viewport{margin:0}
+.quick-bar .qm-color,.quick-bar .qm-color:hover{background:var(--swatch)!important;border-color:#fff!important;opacity:1}

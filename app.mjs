@@ -930,10 +930,12 @@ function enterQuickMemo(){
  finish();closeMenu();
  const sec=memoSection(),when=new Date().toLocaleString('ja-JP',{year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
  const p=newPage('メモ '+when,sec.id);p.blocks=[];doc.pages.push(p);
- quickMemo={pageId:p.id,prevId:doc.activeId,prevSection:selectedSectionId,prevTool:tool,fullscreen:false};
+ const reading=document.body.classList.contains('reading');
+ quickMemo={pageId:p.id,prevId:doc.activeId,prevSection:selectedSectionId,prevTool:tool,prevReading:reading,fullscreen:false};
  doc.activeId=p.id;selectedSectionId=null;
  document.body.classList.add('quick-memo');document.body.classList.remove('nav-open');$('quick-bar').hidden=false;
- showPage();if(tool!=='pen')chooseTool('pen');
+ if(reading)$('view-pan').click(); // 閲覧 (scroll-only) mode would swallow the pen: always start writable
+ showPage();chooseTool('pen');
  growPage(p,Math.ceil(innerHeight/(scale||1))+40); // the sheet covers the whole screen from the start
  scrollTo(0,0);changed(p);syncQuickBar();
  const fs=document.documentElement.requestFullscreen?.({navigationUI:'hide'});
@@ -949,6 +951,7 @@ function exitQuickMemo(){
  selectedSectionId=q.prevSection&&sectionOf(doc,q.prevSection)?q.prevSection:null;
  if(q.prevTool!=='pen')chooseTool(q.prevTool);
  showPage();changed();
+ if(q.prevReading&&!document.body.classList.contains('reading'))$('view-pan').click();
  if(empty)message('何も書かなかったので、メモは保存しませんでした。');
  else{const sec=sectionOf(doc,p.sectionId);message('「'+p.title+'」を「'+(sec?.name||'メモ')+'」セクションに保存しました。');}
 }

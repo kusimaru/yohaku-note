@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>タッチの確認</title>
+<style>
+ :root{color-scheme:light}
+ body{margin:0;font-family:system-ui,"Yu Gothic UI","Meiryo",sans-serif;background:#f6f8f5;color:#1f2d27;touch-action:none;user-select:none;-webkit-user-select:none}
+ header{padding:20px 24px 8px}
+ h1{font-size:30px;margin:0 0 8px}
+ p.lead{font-size:22px;margin:0;line-height:1.6}
+ #pad{margin:16px 24px;height:38vh;border:3px dashed #7aa38c;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;color:#6b7d73;position:relative;overflow:hidden}
+ .dot{position:absolute;border-radius:50%;background:#4268b055;border:2px solid #4268b0;transform:translate(-50%,-50%);pointer-events:none}
+ table{margin:0 24px 24px;border-collapse:collapse;font-size:24px}
+ td{padding:8px 16px;border-bottom:1px solid #dce3dd}
+ td:first-child{color:#5f7166}
+ td:last-child{font-weight:700}
+ .yes{color:#2f7a4f}.no{color:#a2363b}
+</style></head>
+<body>
+<header><h1>タッチの確認（余白ノート）</h1>
+<p class="lead">下の白い枠の中を、<b>指一本</b>でなぞってください。次に<b>指二本</b>で広げたり、つまんだりしてください。<br>終わったら、この画面を写真かスクリーンショットで送ってください。</p></header>
+<div id="pad">ここを指でさわる</div>
+<table>
+ <tr><td>画面がタッチ対応と言っているか</td><td id="r-max"></td></tr>
+ <tr><td>指のタッチ（タッチイベント）が届いたか</td><td id="r-touch" class="no">まだ</td></tr>
+ <tr><td>指のタッチ（ポインター）が届いたか</td><td id="r-ptouch" class="no">まだ</td></tr>
+ <tr><td>マウスとして届いたか</td><td id="r-mouse" class="no">まだ</td></tr>
+ <tr><td>ペンとして届いたか</td><td id="r-pen" class="no">まだ</td></tr>
+ <tr><td>ホイール（スクロール）として届いたか</td><td id="r-wheel" class="no">まだ</td></tr>
+ <tr><td>指の大きさ（半径）　最小〜最大</td><td id="r-radius">—</td></tr>
+ <tr><td>同時にさわった指の数（最大）</td><td id="r-count">0</td></tr>
+ <tr><td>指で動かした距離</td><td id="r-move">0</td></tr>
+</table>
+<script>
+const $=id=>document.getElementById(id),pad=$('pad');
+const yes=(id,text)=>{const e=$(id);e.textContent=text||'はい';e.className='yes';};
+$('r-max').textContent=(navigator.maxTouchPoints||0)>0?'はい（'+navigator.maxTouchPoints+' 点）':'いいえ（0 点）';
+let rmin=Infinity,rmax=0,maxCount=0,moved=0,last=null;
+const radius=(x,y)=>{if(!(x>0||y>0))return;const r=Math.round(Math.max(x||0,y||0));rmin=Math.min(rmin,r);rmax=Math.max(rmax,r);$('r-radius').textContent=rmin+' 〜 '+rmax+' px';};
+const dot=(x,y,r)=>{const b=pad.getBoundingClientRect(),d=document.createElement('div');d.className='dot';const s=Math.max(12,(r||6)*2);d.style.cssText='left:'+(x-b.left)+'px;top:'+(y-b.top)+'px;width:'+s+'px;height:'+s+'px';pad.append(d);setTimeout(()=>d.remove(),900);};
+pad.addEventListener('touchstart',e=>{e.preventDefault();yes('r-touch','はい');maxCount=Math.max(maxCount,e.touches.length);$('r-count').textContent=maxCount;for(const t of e.changedTouches){radius(t.radiusX,t.radiusY);dot(t.clientX,t.clientY,Math.max(t.radiusX||0,t.radiusY||0));}last=e.touches.length===1?[e.touches[0].clientX,e.touches[0].clientY]:null;},{passive:false});
+pad.addEventListener('touchmove',e=>{e.preventDefault();maxCount=Math.max(maxCount,e.touches.length);$('r-count').textContent=maxCount;const t=e.touches[0];radius(t.radiusX,t.radiusY);dot(t.clientX,t.clientY,Math.max(t.radiusX||0,t.radiusY||0));if(last&&e.touches.length===1){moved+=Math.hypot(t.clientX-last[0],t.clientY-last[1]);$('r-move').textContent=Math.round(moved)+' px';}last=e.touches.length===1?[t.clientX,t.clientY]:null;},{passive:false});
+pad.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'){yes('r-ptouch','はい（大きさ '+Math.round(e.width)+'×'+Math.round(e.height)+'）');radius(e.width/2,e.height/2);}else if(e.pointerType==='pen')yes('r-pen');else if(e.pointerType==='mouse')yes('r-mouse');});
+pad.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&e.buttons)dot(e.clientX,e.clientY,e.width/2);});
+pad.addEventListener('wheel',e=>{e.preventDefault();yes('r-wheel',e.ctrlKey?'はい（Ctrl 付き＝拡大縮小）':'はい');},{passive:false});
+</script>
+</body></html>

@@ -1993,8 +1993,9 @@ const stylusTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType==='stylus')
 // iPad / iPhone: the OS tells stylus and finger apart, so fingers may scroll the page even in
 // pen mode (stylus touches are default-prevented above). Other platforms keep touch-action:none.
 // Palm guard (Windows tablets such as the Surface Go): Windows cannot tell a resting palm or little finger
-// from a scrolling finger at the moment of contact, so with the guard on, one finger never moves the paper.
-// Two fingers still move and zoom it (see the pinch handling), taps still work, 閲覧 still scrolls.
+// from a scrolling finger at the moment of contact, so with the guard on the browser never pans the paper itself.
+// One finger still scrolls it through the finger-scroll handling (only once it really moves, never for palm-sized
+// contacts or while the pen is near / just used); two fingers move and zoom it; taps work; 閲覧 still scrolls.
 // Default: on for touch screens other than iPad/iPhone (their OS tells pen and finger apart).
 {
  const isAppleTouch=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
@@ -2002,7 +2003,7 @@ const stylusTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType==='stylus')
  try{const v=localStorage.getItem('yohaku-palm-guard');if(v==='1')on=true;else if(v==='0')on=false;}catch{}
  const apply=()=>{document.body.classList.toggle('palm-guard',on);$('palm-guard').setAttribute('aria-pressed',String(on));};
  $('palm-guard').onclick=()=>{on=!on;try{localStorage.setItem('yohaku-palm-guard',on?'1':'0');}catch{}apply();
-  message(on?'指一本では紙が動かなくなりました。紙を動かすときは二本指でなぞるか、「閲覧」を使ってください。':'指一本で紙を動かせるように戻しました。');};
+  message(on?'手のひらや小指が触れても紙が動かないようにしました。指一本でなぞればスクロールできます（ペンで書いている間は動きません）。':'手のひら防止を切りました。');};
  apply();
 }
 const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
@@ -2697,6 +2698,37 @@ function initializePresentation(){
   }
   preview.cx=cx;preview.cy=cy;preview.z=clampZoom(preview.z0*d/pinchD0);drawPreview();
  },{passive:false});
+ // one finger scrolls the page also with the palm guard on (touch-action is none there, so the page is moved here).
+ // It starts only after the finger really moves (a resting little finger does not), never for palm-sized contacts,
+ // never while the pen is near or was used in the last 2.5 s, and the pen stops it at once. A flick keeps gliding.
+ let fingerScroll=null,glide=0;
+ const stopGlide=()=>{if(glide){cancelAnimationFrame(glide);glide=0;}};
+ const scrollPage=(dx,dy)=>{if(dy)window.scrollBy(0,dy);if(dx&&vp.scrollWidth>vp.clientWidth)vp.scrollLeft+=dx;};
+ vp.addEventListener('touchstart',e=>{
+  stopGlide();fingerScroll=null;
+  if(!document.body.classList.contains('palm-guard')||document.body.classList.contains('reading')||e.touches.length!==1)return;
+  const t=e.touches[0];
+  if(t.touchType==='stylus'||palmSized([t])||penRecently())return;
+  if(e.target instanceof Element&&e.target.closest('button,select,input,textarea,.editor,.block-bar,.resize,.grip,audio,video'))return;
+  fingerScroll={id:t.identifier,x:t.clientX,y:t.clientY,x0:t.clientX,y0:t.clientY,on:false,v:[0,0],at:performance.now()};
+ },{passive:true});
+ vp.addEventListener('touchmove',e=>{
+  const f=fingerScroll;if(!f)return;
+  const t=[...e.touches].find(x=>x.identifier===f.id);
+  if(e.touches.length!==1||!t||palmSized([t])||penRecently()){fingerScroll=null;return;}
+  if(!f.on){if(Math.hypot(t.clientX-f.x0,t.clientY-f.y0)<12)return;f.on=true;f.x=t.clientX;f.y=t.clientY;f.at=performance.now();}
+  e.preventDefault();
+  const now=performance.now(),dt=Math.max(1,now-f.at),dx=f.x-t.clientX,dy=f.y-t.clientY;
+  scrollPage(dx,dy);
+  f.v=[f.v[0]*.6+dx/dt*.4,f.v[1]*.6+dy/dt*.4];f.x=t.clientX;f.y=t.clientY;f.at=now;
+ },{passive:false});
+ for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,()=>{
+  const f=fingerScroll;fingerScroll=null;if(!f||!f.on||performance.now()-f.at>80)return;
+  let [vx,vy]=f.v,last=performance.now();if(Math.hypot(vx,vy)<.25)return;
+  const step=now=>{const dt=Math.min(40,now-last);last=now;if(penRecently()){glide=0;return;}
+   scrollPage(vx*dt,vy*dt);const k=Math.pow(.995,dt);vx*=k;vy*=k;glide=Math.hypot(vx,vy)>.03?requestAnimationFrame(step):0;};
+  glide=requestAnimationFrame(step);
+ });
  for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,e=>{
   if(e.touches.length===0)pinchBlocked=false;
   if(!pinchActive||e.touches.length>=2)return;pinchActive=false;pinchStart=null;if(preview)endPreview();

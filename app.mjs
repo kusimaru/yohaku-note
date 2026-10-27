@@ -2674,7 +2674,9 @@ function initializePresentation(){
  // and (c) the two fingers really move (spread/pinch or slide). A resting palm or little finger does none of that.
  let pinchD0=0,pinchStart=null,pinchBlocked=false;
  const penRecently=()=>performance.now()-lastPenAt<2500||sheet.classList.contains('pen-near')||!!gesture;
- const palmSized=t=>t.some(x=>Math.max(x.radiusX||0,x.radiusY||0)>=25);
+ // palm = a clearly wide contact. Not lower than 45 px: some pen displays (an XP-Pen 液タブ) report every finger as
+ // radius 25 whatever touches the glass, and with 25 here every finger counted as a palm (no scrolling, no zoom).
+ const palmSized=t=>t.some(x=>Math.max(x.radiusX||0,x.radiusY||0)>=45);
  cancelPinch=()=>{ // pen arrived: drop the gesture, keep the zoom as it was
   pinchActive=false;pinchStart=null;pinchBlocked=true;
   if(preview){if(previewRaf){cancelAnimationFrame(previewRaf);previewRaf=0;}preview=null;paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';updateZoomUi(zoomFactor());}

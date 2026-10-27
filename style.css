@@ -1019,3 +1019,4 @@ body.quick-memo #empty-hint{display:none!important}
 @media(max-width:700px){.quick-bar{left:8px;right:8px;top:8px;justify-content:space-between;flex-wrap:wrap}.quick-bar button{padding:0 10px}}
 body.quick-memo #paper-viewport{margin:0}
 .quick-bar .qm-color,.quick-bar .qm-color:hover{background:var(--swatch)!important;border-color:#fff!important;opacity:1}
+.quick-bar button[hidden]{display:none}

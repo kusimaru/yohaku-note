@@ -933,7 +933,7 @@ function enterQuickMemo(){
  const reading=document.body.classList.contains('reading');
  quickMemo={pageId:p.id,prevId:doc.activeId,prevSection:selectedSectionId,prevTool:tool,prevReading:reading,fullscreen:false};
  doc.activeId=p.id;selectedSectionId=null;
- document.body.classList.add('quick-memo');document.body.classList.remove('nav-open');$('quick-bar').hidden=false;
+ document.body.classList.add('quick-memo');document.body.classList.remove('nav-open');$('quick-bar').hidden=false;$('qm-fit').hidden=true;
  if(reading)$('view-pan').click(); // 閲覧 (scroll-only) mode would swallow the pen: always start writable
  showPage();chooseTool('pen');
  growPage(p,Math.ceil(innerHeight/(scale||1))+40); // the sheet covers the whole screen from the start
@@ -960,6 +960,7 @@ $('qm-done').onclick=exitQuickMemo;
 $('qm-pen').onclick=()=>{chooseTool('pen');syncQuickBar();};
 $('qm-eraser').onclick=()=>{chooseTool('eraser');syncQuickBar();};
 $('qm-undo').onclick=()=>{$('undo').click();syncQuickBar();};
+$('qm-fit').onclick=()=>{if(!quickMemo)return;finish();quickMemo.zoom=null;$('paper-viewport').scrollLeft=0;layout();$('qm-fit').hidden=true;};
 for(const b of document.querySelectorAll('.qm-color'))b.onclick=()=>{if(tool!=='pen')chooseTool('pen');document.querySelector('.toolbar .swatch[data-color="'+b.dataset.color+'"]')?.click();syncQuickBar();};
 document.addEventListener('keydown',e=>{if(quickMemo&&e.key==='Escape'){e.preventDefault();exitQuickMemo();}},{capture:true});
 document.addEventListener('fullscreenchange',()=>{if(quickMemo?.fullscreen&&!document.fullscreenElement)exitQuickMemo();});
@@ -2629,7 +2630,7 @@ function initializePresentation(){
  const zoomFactor=()=>zoomMode==='fit'?null:customZoom;
  sizePaper=()=>{
   recallSectionZoom();
-  const z=quickMemo?null:zoomFactor(),width=pw(page()); // すぐメモ: always the whole screen width, whatever zoom the section remembers
+  const z=quickMemo?(quickMemo.zoom??null):zoomFactor(),width=pw(page()); // すぐメモ starts at the whole screen width, whatever zoom the section remembers; a pinch there zooms only that memo
   paper.style.width=z===null?(width===W?'100%':Math.round(vp.clientWidth*width/W)+'px'):(width*z)+'px';
   updateZoomUi(z); // the slider shows the effective factor, also after page switches and window resizes
  };
@@ -2657,10 +2658,10 @@ function initializePresentation(){
  function endPreview(){
   if(!preview)return;if(previewRaf){cancelAnimationFrame(previewRaf);previewRaf=0;}
   const pv=preview;preview=null;paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';
-  setCustomZoom(pv.z);layout();
+  if(quickMemo)quickMemo.zoom=clampZoom(pv.z);else setCustomZoom(pv.z);layout();
   const z=paper.clientWidth/pw(page()),r=vp.getBoundingClientRect();vp.scrollLeft=pv.px*z-(pv.cx-r.left);
   const want=pv.cy-pv.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
-  updateZoomUi(customZoom);persistZoom();
+  if(quickMemo){updateZoomUi(quickMemo.zoom);$('qm-fit').hidden=false;}else{updateZoomUi(customZoom);persistZoom();} // a memo's zoom is not remembered for the section
  }
  // slider: zoom around the middle of what is on screen
  // slider: horizontally around the middle, vertically at the top edge of the visible paper, so the rows above the paper never move

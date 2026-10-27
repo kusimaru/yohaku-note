@@ -2013,9 +2013,11 @@ const activeGesture=()=>gesture&&['ink','lasso','marquee','drag','move','resize'
 // While the pen is writing (and for 1.5 s after it last touched), a palm or finger landing on the page
 // must not scroll it: the hand usually rests on the glass before the pen tip arrives, which moved the page
 // up and down mid-word on iPad. A wide contact (radius >= 22 px) is treated as a palm straight away.
-let lastPenAt=-1e9,cancelPinch=()=>{};
+let lastPenAt=-1e9,lastPenContactAt=-1e9,cancelPinch=()=>{};
 // the pen wins over any two-finger gesture: a palm or little finger resting on the glass often reports two contacts
-for(const ev of ['pointerdown','pointermove'])document.addEventListener(ev,e=>{if(e.pointerType==='pen'&&sheet.contains(e.target)){lastPenAt=performance.now();if(pinchActive)cancelPinch();}},{capture:true,passive:true}); // pen on the paper only; a pen tap on a button is not "writing"
+// Only a pen that touches the glass counts for finger gestures: a pen display reports the pen hovering 1-2 cm above the
+// screen, i.e. while it is simply held in the hand that pinches, and the pinch was dropped the moment it began.
+for(const ev of ['pointerdown','pointermove'])document.addEventListener(ev,e=>{if(e.pointerType==='pen'&&sheet.contains(e.target)){lastPenAt=performance.now();if(ev==='pointerdown'||e.buttons){lastPenContactAt=lastPenAt;if(pinchActive)cancelPinch();}}},{capture:true,passive:true}); // pen on the paper only; a pen tap on a button is not "writing"
 const inkToolNow=()=>tool==='pen'||tool==='eraser'||tool==='select'||(tool==='text'&&$('auto-pen').checked);
 // iPad reports fingertips with radii around 20-35 px, so only clearly wider contacts count as a palm, and only for the drawing tools
 const palmTouch=e=>[...(e.changedTouches||[])].some(t=>t.touchType!=='stylus'&&Math.max(t.radiusX||0,t.radiusY||0)>=45);
@@ -2674,7 +2676,7 @@ function initializePresentation(){
  // A pinch only starts when (a) the pen has not been near the page for 2.5 s, (b) neither contact is palm-sized,
  // and (c) the two fingers really move (spread/pinch or slide). A resting palm or little finger does none of that.
  let pinchD0=0,pinchStart=null,pinchBlocked=false;
- const penRecently=()=>performance.now()-lastPenAt<2500||sheet.classList.contains('pen-near')||!!gesture;
+ const penRecently=()=>performance.now()-lastPenContactAt<2500||!!gesture; // pen on the glass now or in the last 2.5 s (hovering does not count)
  // palm = a clearly wide contact. Not lower than 45 px: some pen displays (an XP-Pen 液タブ) report every finger as
  // radius 25 whatever touches the glass, and with 25 here every finger counted as a palm (no scrolling, no zoom).
  const palmSized=t=>t.some(x=>Math.max(x.radiusX||0,x.radiusY||0)>=45);

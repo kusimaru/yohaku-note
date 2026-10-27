@@ -2647,13 +2647,18 @@ function initializePresentation(){
  let preview=null,previewRaf=0;
  function beginPreview(cx,cy){
   finish();const r=vp.getBoundingClientRect(),z0=paper.clientWidth/pw(page()),top=sheet.getBoundingClientRect().top,pr=paper.getBoundingClientRect();
-  preview={z0,z:z0,px:(vp.scrollLeft+cx-r.left)/z0,py:(cy-top)/z0,cx0:cx,cy0:cy,cx,cy,lx:cx-pr.left,ly:cy-pr.top};
+  preview={z0,z:z0,px:(cx-pr.left)/z0,py:(cy-top)/z0,cx0:cx,cy0:cy,cx,cy,lx:cx-pr.left,ly:cy-pr.top,pl:pr.left,pt:pr.top,vl:r.left+vp.clientLeft,vw:vp.clientWidth};
   paper.style.transformOrigin='0 0';paper.style.willChange='transform';vp.style.overflow='hidden';
  }
  function drawPreview(){
   if(previewRaf)return;
   previewRaf=requestAnimationFrame(()=>{previewRaf=0;if(!preview)return;
-   const f=preview.z/preview.z0,dx=(preview.cx-preview.cx0)+preview.lx*(1-f),dy=(preview.cy-preview.cy0)+preview.ly*(1-f);
+   const f=preview.z/preview.z0;let dx=(preview.cx-preview.cx0)+preview.lx*(1-f),dy=(preview.cy-preview.cy0)+preview.ly*(1-f);
+   // the same place the paper lands after the re-layout: centred when narrower than the screen, otherwise no gap at the sides
+   const w=pw(page())*preview.z,h=page().height*preview.z,left=preview.pl+dx;
+   if(w<=preview.vw)dx=preview.vl+(preview.vw-w)/2-preview.pl;else dx+=Math.min(0,preview.vl-left)+Math.max(0,preview.vl+preview.vw-(left+w));
+   if(quickMemo){const top=preview.pt+dy;if(h<=innerHeight)dy=(innerHeight-h)/2-preview.pt;else dy+=Math.min(0,-top)+Math.max(0,innerHeight-(top+h));}
+   else dy=Math.min(dy,scrollY); // the page cannot scroll above its top: the paper's top edge never comes down further than that
    paper.style.transform='translate('+dx.toFixed(1)+'px,'+dy.toFixed(1)+'px) scale('+f.toFixed(4)+')';
    zoomMode='custom';updateZoomUi(preview.z);});
  }
@@ -2661,7 +2666,7 @@ function initializePresentation(){
   if(!preview)return;if(previewRaf){cancelAnimationFrame(previewRaf);previewRaf=0;}
   const pv=preview;preview=null;paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';
   if(quickMemo)quickMemo.zoom=clampZoom(pv.z);else setCustomZoom(pv.z);layout();
-  const z=paper.clientWidth/pw(page()),r=vp.getBoundingClientRect();vp.scrollLeft=pv.px*z-(pv.cx-r.left);
+  const z=paper.clientWidth/pw(page());vp.scrollLeft+=paper.getBoundingClientRect().left-(pv.cx-pv.px*z); // keeps the point under the fingers; a paper narrower than the screen stays centred (CSS)
   const want=pv.cy-pv.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
   if(quickMemo){updateZoomUi(quickMemo.zoom);$('qm-fit').hidden=false;}else{updateZoomUi(customZoom);persistZoom();} // a memo's zoom is not remembered for the section
  }

@@ -2678,39 +2678,50 @@ function initializePresentation(){
  // two-finger pinch on the page
  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
  const centre=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
- // A pinch only starts when (a) the pen has not been near the page for 2.5 s, (b) neither contact is palm-sized,
- // and (c) the two fingers really move (spread/pinch or slide). A resting palm or little finger does none of that.
- let pinchD0=0,pinchStart=null,pinchBlocked=false;
- const penRecently=()=>performance.now()-lastPenContactAt<2500||!!gesture; // pen on the glass now or in the last 2.5 s (hovering does not count)
+ // A pinch only starts when (a) the pen has not touched the page in the last second, (b) no contact is palm-sized,
+ // and (c) two fingers really move (spread/pinch or slide). A resting palm or little finger does none of that.
+ // More than two contacts (e.g. the hand holding the pen resting on the glass): the two that move most do the pinch
+ // and the resting one is ignored; a contact that lands while zooming is ignored too.
+ let pinchD0=0,pinchStarts=new Map(),pinchPair=null,pinchBlocked=false;
+ const penRecently=()=>performance.now()-lastPenContactAt<1000||!!gesture; // pen on the glass now or in the last second (hovering does not count)
  // palm = a clearly wide contact. Not lower than 45 px: some pen displays (an XP-Pen 液タブ) report every finger as
  // radius 25 whatever touches the glass, and with 25 here every finger counted as a palm (no scrolling, no zoom).
  const palmSized=t=>t.some(x=>Math.max(x.radiusX||0,x.radiusY||0)>=45);
  cancelPinch=()=>{ // pen arrived: drop the gesture, keep the zoom as it was
-  pinchActive=false;pinchStart=null;pinchBlocked=true;
+  pinchActive=false;pinchStarts.clear();pinchPair=null;pinchBlocked=true;
   if(preview){if(previewRaf){cancelAnimationFrame(previewRaf);previewRaf=0;}preview=null;paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';updateZoomUi(zoomFactor());}
  };
  vp.addEventListener('touchstart',e=>{
   if(e.touches.length<2)return;
   e.preventDefault();
-  if(e.touches.length!==2||penRecently()||palmSized([...e.touches])){if(pinchActive)cancelPinch();pinchBlocked=true;return;}
+  if(pinchPair)return; // already zooming: another contact landing now does not stop it
+  if(penRecently()||palmSized([...e.touches])){if(pinchActive)cancelPinch();pinchBlocked=true;return;}
   if(pinchBlocked)return; // still the same group of contacts that was rejected
-  const t=[e.touches[0],e.touches[1]];pinchActive=true;pinchD0=dist(t);pinchStart=centre(t);
+  for(const t of e.touches)if(!pinchStarts.has(t.identifier))pinchStarts.set(t.identifier,[t.clientX,t.clientY]);
+  pinchActive=true;
  },{passive:false});
  vp.addEventListener('touchmove',e=>{
   if(e.touches.length>=2&&(pinchActive||pinchBlocked))e.preventDefault();
-  if(!pinchActive||e.touches.length<2)return;
+  if(!pinchActive)return;
   if(penRecently()){cancelPinch();return;}
-  const t=[e.touches[0],e.touches[1]],[cx,cy]=centre(t),d=dist(t);
-  if(!preview){
-   const moved=Math.abs(d-pinchD0)>Math.max(14,pinchD0*.08)||Math.hypot(cx-pinchStart[0],cy-pinchStart[1])>24;
-   if(!moved)return;
-   beginPreview(pinchStart[0],pinchStart[1]);
+  let t;
+  if(pinchPair){t=pinchPair.map(id=>[...e.touches].find(x=>x.identifier===id));if(!t[0]||!t[1])return;}
+  else{
+   // the two contacts that moved most since they landed; zooming starts once they really move
+   const m=[...e.touches].filter(x=>pinchStarts.has(x.identifier)).map(x=>{const s=pinchStarts.get(x.identifier);return [Math.hypot(x.clientX-s[0],x.clientY-s[1]),x];}).sort((a,b)=>b[0]-a[0]);
+   if(m.length<2)return;
+   t=[m[0][1],m[1][1]];
+   const s0=t.map(x=>pinchStarts.get(x.identifier)),d0=Math.hypot(s0[0][0]-s0[1][0],s0[0][1]-s0[1][1]),c0=[(s0[0][0]+s0[1][0])/2,(s0[0][1]+s0[1][1])/2],[cx,cy]=centre(t);
+   if(!(Math.abs(dist(t)-d0)>Math.max(14,d0*.08)||Math.hypot(cx-c0[0],cy-c0[1])>24))return;
+   pinchPair=[t[0].identifier,t[1].identifier];pinchD0=d0;
+   beginPreview(c0[0],c0[1]);
   }
+  const [cx,cy]=centre(t),d=dist(t);
   preview.cx=cx;preview.cy=cy;preview.z=clampZoom(preview.z0*d/pinchD0);drawPreview();
  },{passive:false});
  // one finger scrolls the page also with the palm guard on (touch-action is none there, so the page is moved here).
  // It starts only after the finger really moves (a resting little finger does not), never for palm-sized contacts,
- // never while the pen is near or was used in the last 2.5 s, and the pen stops it at once. A flick keeps gliding.
+ // never while the pen is on the glass or touched it in the last second, and the pen stops it at once. A flick keeps gliding.
  let fingerScroll=null,glide=0;
  const stopGlide=()=>{if(glide){cancelAnimationFrame(glide);glide=0;}};
  const scrollPage=(dx,dy)=>{if(dy)window.scrollBy(0,dy);if(dx&&vp.scrollWidth>vp.clientWidth)vp.scrollLeft+=dx;};
@@ -2739,9 +2750,15 @@ function initializePresentation(){
    scrollPage(vx*dt,vy*dt);const k=Math.pow(.995,dt);vx*=k;vy*=k;glide=Math.hypot(vx,vy)>.03?requestAnimationFrame(step):0;};
   glide=requestAnimationFrame(step);
  });
- for(const ev of ['touchend','touchcancel'])vp.addEventListener(ev,e=>{
+ // on the document, not the paper: a finger that landed outside the paper (a panel, the bar) and is lifted last
+ // must still clear the block, or the next pinch was refused until the next tap
+ for(const ev of ['touchend','touchcancel'])document.addEventListener(ev,e=>{
+  for(const t of e.changedTouches)pinchStarts.delete(t.identifier);
   if(e.touches.length===0)pinchBlocked=false;
-  if(!pinchActive||e.touches.length>=2)return;pinchActive=false;pinchStart=null;if(preview)endPreview();
+  if(!pinchActive)return;
+  const ids=[...e.touches].map(x=>x.identifier);
+  if(pinchPair?pinchPair.every(id=>ids.includes(id)):e.touches.length>=2)return;
+  pinchActive=false;pinchStarts.clear();pinchPair=null;if(preview)endPreview();
  });
  $('view-pan').onclick=()=>setReading(!document.body.classList.contains('reading'));
  // Ancestor capture runs before the existing drawing handlers. Native touch

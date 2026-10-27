@@ -721,6 +721,7 @@ body .zoom-fit{padding:6px 12px;min-height:40px}
 /* the view strip: labels never break mid-word; the row wraps as a whole when narrow */
 .view-actions label,.zoom-fit,.view-actions .group-label{white-space:nowrap}
 .view-strip{flex-wrap:wrap;row-gap:8px}
+.view-actions{flex-wrap:wrap;row-gap:6px;min-width:0}.view-actions button{white-space:nowrap}.view-pair{display:inline-flex;align-items:center;gap:9px}.view-panel .view-note{display:none}
 .view-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 
 /* ---------- the tool rows (tools + view/zoom row) stay pinned under the top bar while the page scrolls or zooms ---------- */

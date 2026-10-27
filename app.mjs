@@ -1078,6 +1078,11 @@ function makeSplitter(handle,{key,prop,min,max,from}){
 makeSplitter($('rail-splitter'),{key:'yohaku-rail-width',prop:'--rail',min:()=>300,max:()=>Math.max(320,Math.min(1100,innerWidth-360)),from:()=>0});
 makeSplitter($('col-splitter'),{key:'yohaku-nb-col-width',prop:'--nb-col',min:()=>150,max:()=>{const w=document.querySelector('.nav-cols').getBoundingClientRect().width;return Math.max(160,w-170);},from:()=>document.querySelector('.nav-cols').getBoundingClientRect().left});
 $('view-quality').value=quality;
+// how long after the pen touched the glass a finger does not zoom or scroll the paper (the hand still resting there)
+let penWait=1000;try{const v=localStorage.getItem('yohaku-pen-wait');if(['1000','500','0'].includes(v))penWait=Number(v);}catch{}
+$('pen-wait').value=String(penWait);
+$('pen-wait').onchange=e=>{penWait=[1000,500,0].includes(Number(e.target.value))?Number(e.target.value):1000;try{localStorage.setItem('yohaku-pen-wait',String(penWait));}catch{}
+ message(penWait?'ペンで書いた後 '+(penWait/1000)+' 秒は、指で拡大縮小・スクロールしません。':'ペンを画面から離せば、すぐ指で拡大縮小・スクロールできます（書いている途中で手が触れると紙が動くことがあります）。');};
 $('view-quality').onchange=e=>{quality=e.target.value==='light'?'light':'normal';try{localStorage.setItem('yohaku-quality',quality);}catch{}updateViewportCanvas(true);message(quality==='light'?'描画を「軽い」にしました。手書きの解像度を下げて、ペンの遅れを減らします。':'描画を「標準」に戻しました。');};
 let inkView={top:0,bottom:0,k:1},viewRaf=0;
 function viewportRange() {
@@ -2683,7 +2688,7 @@ function initializePresentation(){
  // More than two contacts (e.g. the hand holding the pen resting on the glass): the two that move most do the pinch
  // and the resting one is ignored; a contact that lands while zooming is ignored too.
  let pinchD0=0,pinchStarts=new Map(),pinchPair=null,pinchBlocked=false;
- const penRecently=()=>performance.now()-lastPenContactAt<1000||!!gesture; // pen on the glass now or in the last second (hovering does not count)
+ const penRecently=()=>performance.now()-lastPenContactAt<penWait||!!gesture; // pen on the glass now or within the chosen wait (「ペンの後」, 1 s by default; hovering does not count)
  // palm = a clearly wide contact. Not lower than 45 px: some pen displays (an XP-Pen 液タブ) report every finger as
  // radius 25 whatever touches the glass, and with 25 here every finger counted as a palm (no scrolling, no zoom).
  const palmSized=t=>t.some(x=>Math.max(x.radiusX||0,x.radiusY||0)>=45);

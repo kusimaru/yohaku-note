@@ -486,6 +486,25 @@ export function restoreTrash(doc,entryId) {
  if(entry.pages[0])doc.activeId=entry.pages[0].id;
  return entry;
 }
+// A page that is on the notebook and also inside a trash entry (e.g. restored on another device while this one
+// still had it in the trash, then synced back) made the notebook fail validation, so it did not open at all.
+// The trashed copy gets an id of its own: both copies are kept, the trash entry counts as changed now (so this
+// version wins over the old one in the cloud). onlyIds limits it to those live pages. Returns the changed entry ids.
+export function separateTrashedCopies(doc,onlyIds=null) {
+ if(!doc||!Array.isArray(doc.pages)||!Array.isArray(doc.trash))return []; // anything malformed is left to validateBackup
+ const live=new Set(doc.pages.map(p=>p&&p.id)),seen=new Set(),changed=[];
+ for(const t of doc.trash){
+  if(!t)continue;
+  let hit=false;
+  for(const p of Array.isArray(t.pages)?t.pages:[]){
+   if(!p)continue;
+   if((live.has(p.id)&&(!onlyIds||onlyIds.has(p.id)))||seen.has(p.id)){p.id=crypto.randomUUID();hit=true;}
+   seen.add(p.id);
+  }
+  if(hit){t.deletedAt=Date.now();changed.push(t.id);}
+ }
+ return changed;
+}
 export function purgeTrash(doc,entryId) {
  const i=(doc.trash||[]).findIndex(t=>t.id===entryId);if(i<0)return false;
  doc.trash.splice(i,1);return true;

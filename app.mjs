@@ -1,4 +1,4 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, folderOf, foldersIn, pageFolder, addFolder, renameFolder, deleteFolder, setPageFolder, moveFolder, setFolderPlace, pageColumn, folderToSection, folderParent, foldersUnder, folderPath, folderTree, setFolderParent, sectionToFolder, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, separateTrashedCopies, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, folderOf, foldersIn, pageFolder, addFolder, renameFolder, deleteFolder, setPageFolder, moveFolder, setFolderPlace, pageColumn, folderToSection, folderParent, foldersUnder, folderPath, folderTree, setFolderParent, sectionToFolder, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
@@ -2405,6 +2405,8 @@ function applyRemotePage(id,pg) {
    if(doc.activeId===id)doc.activeId=doc.pages[Math.min(i,doc.pages.length-1)].id;
   } else {
    ensureLayers(pg);if(i>=0)doc.pages[i]=pg;else doc.pages.push(pg);histories.delete(id);dirtyPages.add(id);
+   // restored on another device while still in this device's trash: keep the trashed copy as its own page
+   for(const t of separateTrashedCopies(doc,new Set([id]))){dirtyTrash.add(t);syncEngine?.markTrash(t);}
   }
   ensureStructure(doc);revision++;dirty=true;
   if(!pg||id===doc.activeId)showPage();else renderPages();
@@ -2417,6 +2419,9 @@ function applyRemoteTrash(id,entry) {
   doc.trash=(doc.trash||[]).filter(t=>t.id!==id);
   if(entry){
    doc.trash.push(entry);dirtyTrash.add(id);
+   // a page edited here after it was deleted elsewhere stays on the notebook; the deleted copy keeps its own id in the trash
+   const newer=new Set(doc.pages.filter(pg=>entry.pages.some(x=>x.id===pg.id)&&(pg.updatedAt||0)>(entry.deletedAt||0)).map(pg=>pg.id));
+   if(newer.size&&separateTrashedCopies(doc,newer).length)syncEngine?.markTrash(id);
    const ids=new Set(entry.pages.map(pg=>pg.id));
    if(doc.pages.some(pg=>ids.has(pg.id))){doc.pages=doc.pages.filter(pg=>!ids.has(pg.id));if(!doc.pages.length)doc.pages.push(newPage('はじめのページ'));if(!doc.pages.some(pg=>pg.id===doc.activeId))doc.activeId=doc.pages[0].id;}
   }
@@ -2507,15 +2512,18 @@ async function start() {
    const next=upgradeNotebook(saved);await migrateNotebook(db,saved,next);doc=next;
    message('以前のメモを新しい形式に変換しました。文章はページ内の入力欄に移し、手書きの位置はそのままです。変換前のデータもブラウザ内に残しています。');
   }
-  else if(saved)doc=validateBackup(saved);
-  else{const p=newPage('はじめのページ');doc={version:2,pages:[p],activeId:p.id};}
-  let filled=ensureStructure(doc);for(const p of doc.pages)if(ensureLayers(p))filled=true;
+  let repaired=0;
+  if(saved&&saved.version===2)repaired=separateTrashedCopies(saved).length; // a page both on the notebook and in the trash (see model)
+  if(saved&&saved.version!==1)doc=validateBackup(saved);
+  else if(!saved){const p=newPage('はじめのページ');doc={version:2,pages:[p],activeId:p.id};}
+  let filled=ensureStructure(doc)||repaired>0;for(const p of doc.pages)if(ensureLayers(p))filled=true;
   lastSaved={pages:new Set(doc.pages.map(pg=>pg.id)),trash:new Set((doc.trash||[]).map(t=>t.id))};
   if(filled)dirtyAll=true;
   ready=true;document.querySelectorAll('button,input,textarea,select').forEach(el=>el.disabled=false);
   lastPaperWidth=paper.clientWidth;showPage();chooseTool('text');
   if(filled){revision++;dirty=true;save();}
   if(saved&&saved.version!==1)setStatus('保存済み');else changed();
+  if(repaired)message('ノートとごみ箱の両方に同じページが入っていたため、開けなくなっていました。ごみ箱の方を別のページとして分けて、開けるように直しました（どちらも消していません）。');
   if('serviceWorker' in navigator)setupServiceWorker();
   syncBoot();
   importFromOekaki();

@@ -37,8 +37,9 @@ const page=()=>doc.pages.find(p=>p.id===doc.activeId);
 const pageById=id=>doc.pages.find(p=>p.id===id);
 const historyFor=id=>{if(!histories.has(id))histories.set(id,{undo:[],redo:[]});return histories.get(id);};
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
-const snapshot=p=>{ensureLayers(p);return {strokes:p.strokes.slice(),blocks:p.blocks.slice(),height:p.height,layers:p.layers.slice(),activeLayer:p.activeLayer};};
-function restore(p,s){p.strokes=s.strokes;p.blocks=s.blocks;p.height=s.height;if(s.layers){p.layers=s.layers;p.activeLayer=s.activeLayer;}}
+// undo also takes back a page widened (or grown) by the step
+const snapshot=p=>{ensureLayers(p);return {strokes:p.strokes.slice(),blocks:p.blocks.slice(),height:p.height,width:p.width,layers:p.layers.slice(),activeLayer:p.activeLayer};};
+function restore(p,s){p.strokes=s.strokes;p.blocks=s.blocks;p.height=s.height;if('width' in s){if(s.width===undefined)delete p.width;else p.width=s.width;}if(s.layers){p.layers=s.layers;p.activeLayer=s.activeLayer;}}
 let messageTimer=0;
 function message(text,retry=false) {
  const box=$('message');box.replaceChildren(document.createTextNode(text));box.hidden=false;
@@ -214,7 +215,7 @@ function renderPageList() {
   const wrap=el('div','folder'+(open?'':' closed'));wrap.dataset.folderId=f.id;
   const head=el('div','folder-item');
   const fb=el('button','folder-button');fb.type='button';fb.draggable=true;fb.dataset.folderId=f.id;fb.setAttribute('aria-expanded',String(open));fb.title='クリックで開閉 / ページやフォルダをここへドラッグで入れる / ドラッグで並べ替え';
-  fb.append(icon('chevron-down','chev'),icon('folder','folder-icon'),el('span','folder-name',f.name),el('small','folder-count',String(total)));
+  fb.append(icon('chevron-down','chev'),icon('folder','folder-icon'),(()=>{const l=el('span','folder-label');l.append(el('span','folder-name',f.name),el('small','folder-count',String(total)));return l;})());
   fb.onclick=()=>{folderToggled.add(f.id);if(open)closedFolders.add(f.id);else closedFolders.delete(f.id);saveClosedFolders();renderPageList();};
   const add=el('button','folder-add icon-only','');add.type='button';add.title='このフォルダにページを追加';add.setAttribute('aria-label','フォルダ「'+f.name+'」にページを追加');add.append(icon('plus'));
   add.onclick=e=>{e.stopPropagation();showForm({kind:'new-page',folderId:f.id},'新しいページ（'+f.name+'）','','作成');};
@@ -1288,7 +1289,9 @@ function insideSelection(x,y) {
 }
 // Move the selected strokes/blocks by (dx,dy) relative to `base` (arrays captured before the move).
 function translateSelection(p,base,dx,dy) {
- dx=Math.round(clamp(dx,-base.bounds.x0,pw(page())-base.bounds.x1));dy=Math.round(clamp(dy,-base.bounds.y0,MAX_HEIGHT-base.bounds.y1));
+ // past the right edge the page widens (as with the pen), so something as wide as the page can still move sideways
+ dx=Math.round(clamp(dx,-base.bounds.x0,MAX_WIDTH-base.bounds.x1));dy=Math.round(clamp(dy,-base.bounds.y0,MAX_HEIGHT-base.bounds.y1));
+ if(base.bounds.x1+dx>pw(p))growPageWidth(p,base.bounds.x1+dx+24);
  const moved=new Map();
  for(const s of base.selStrokes)moved.set(s,{...s,points:s.points.map(pt=>[pt[0]+dx,pt[1]+dy,pt[2]])});
  p.strokes=base.strokes.map(s=>moved.get(s)||s);
@@ -1945,8 +1948,9 @@ sheet.addEventListener('pointermove',e=>{
  const p=page(),b=blockOf(gesture.blockId);if(!b)return;
  const [x,y]=coordinates(e),dx=x-gesture.start[0],dy=y-gesture.start[1],o=gesture.origin;
  if(gesture.type==='move'){
-  const nx=Math.round(clamp(o.x+dx,0,pw(page())-b.width)),ny=Math.round(clamp(o.y+dy,0,MAX_HEIGHT-b.height));
+  const nx=Math.round(clamp(o.x+dx,0,MAX_WIDTH-b.width)),ny=Math.round(clamp(o.y+dy,0,MAX_HEIGHT-b.height));
   if(nx===b.x&&ny===b.y)return;
+  if(nx+b.width>pw(p))growPageWidth(p,Math.min(MAX_WIDTH,nx+b.width+24)); // dragging past the right edge widens the page (an image as wide as the page can still move sideways)
   updateBlock(p,b.id,{x:nx,y:ny});growPage(p,ny+b.height+60);
  } else if(b.type==='text'){
   const nw=Math.round(clamp(o.width+dx,120,MAX_WIDTH-b.x-24));if(nw===b.width)return;

@@ -1022,3 +1022,17 @@ body.quick-memo #paper-viewport{margin:0;display:flex;min-height:100vh;min-heigh
 body.quick-memo #paper-viewport>.paper{margin:auto}
 .quick-bar .qm-color,.quick-bar .qm-color:hover{background:var(--swatch)!important;border-color:#fff!important;opacity:1}
 .quick-bar button[hidden]{display:none}
+/* the page column: long titles and folder names wrap to the column width (small laptops) instead of being cut with … ;
+   the right padding keeps the text clear of the … menu button, and icons stay level with the first line */
+.nav-pages .page-button{white-space:normal;padding-right:48px}
+.nav-pages .page-button>span{align-items:flex-start}
+.nav-pages .page-button>span>span,.nav-pages .folder-name,.current-section>span:last-child{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;min-width:0}
+.nav-pages .page-button .icon,.nav-pages .folder-button .chev,.nav-pages .folder-button .folder-icon{margin-top:calc((1lh - var(--ui-icon))/2)}
+.nav-pages .folder-button .chev{margin-top:calc((1lh - 16px)/2)}
+.nav-pages .folder-button{align-items:flex-start}
+/* name and count flow as one text, so the count does not take a column of its own */
+.folder-label{flex:1;min-width:0}
+.nav-pages .folder-count{display:inline-block;margin-left:6px}
+/* with a name on several lines, ＋ and … stay level with the first line */
+body .nav-pages .folder-add,.nav-pages .folder-item .item-menu-button{top:calc(var(--ui-btn)/2)}
+.trash-item .trash-name{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}

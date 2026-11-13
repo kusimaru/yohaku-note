@@ -5,6 +5,7 @@ import { pageToSvg } from './svgexport.mjs';
 import { PROVIDERS, chat as aiChat, listModels as aiListModels, buildContext, pageText, SYSTEM_PROMPT, userTurn, manualPrompt, defaultSettings as aiDefaults } from './ai.mjs';
 import { putMedia, getMedia, deleteMedia, listMediaIds, mediaUsage, stopStream, openCamera, takePhoto, makeRecorder, stamp, fmtTime, extOf, transcribeBlob, TRANSCRIBE_MODELS, APPLE, defaultMime, blobToWav, getMediaDir, setMediaDir, folderSupported, folderPermission, writeToFolder } from './media.mjs';
 import { makeClip, encodeClip, decodeClip, placeClip } from './clip.mjs';
+import { isPdf, openPdf, renderPdfPage, pdfPlaceholder } from './pdf.mjs';
 import { createSyncEngine, createFirebaseTransport, createFakeTransport, describeAuthError } from './sync.mjs';
 import { normalizeRuns, runsToText, blockRuns, blockFontSize, DEFAULT_TEXT_COLOR, MIN_FONT, MAX_FONT, MAX_LAYERS, ensureLayers, activeLayerOf, addLayer, removeLayer, updateLayer, moveLayer } from './model.mjs';
 const off=document.createElement('canvas'),octx=off.getContext('2d');
@@ -459,13 +460,14 @@ async function addMediaBlock(blob,kind,name,duration){
  p.blocks=[...p.blocks,block];growPage(p,y+h+80);commit(before,p);activeBlock=block.id;renderPage();refreshMediaUsage();
  return block;
 }
-async function refreshMediaUsage(){try{const u=await mediaUsage();$('media-usage').textContent=u.count?'録音・動画 '+u.count+' 件（'+(u.bytes/1048576).toFixed(1)+' MB）はこの端末にだけ保存されています。':'録音・動画はこの端末にだけ保存されます。';}catch{}}
+async function refreshMediaUsage(){try{const u=await mediaUsage();$('media-usage').textContent=u.count?'録音・動画・PDF '+u.count+' 件（'+(u.bytes/1048576).toFixed(1)+' MB）はこの端末にだけ保存されています。':'録音・動画はこの端末にだけ保存されます。';}catch{}}
 // drop recordings no page (or trash entry) refers to any more
 async function sweepMedia(){
  try{
   const used=new Set();
-  for(const pg of doc.pages)for(const b of pg.blocks)if(b.type==='media')used.add(b.mediaId);
-  for(const t of doc.trash||[])for(const pg of t.pages||[])for(const b of pg.blocks||[])if(b.type==='media')used.add(b.mediaId);
+  const use=b=>{if(b.type==='media')used.add(b.mediaId);else if(b.pdfId)used.add(b.pdfId);};
+  for(const pg of doc.pages)for(const b of pg.blocks)use(b);
+  for(const t of doc.trash||[])for(const pg of t.pages||[])for(const b of pg.blocks||[])use(b);
   for(const id of await listMediaIds())if(!used.has(id)){const r=await getMedia(id);if(r&&Date.now()-(r.createdAt||0)>7*864e5)await deleteMedia(id);}
  }catch{}
  refreshMediaUsage();
@@ -1457,6 +1459,13 @@ function renderBlocks() {
     copy.onclick=()=>copyBlockText(b.id,el);
     bar.append(copy);
    }
+   if(b.type==='image'&&b.pdfId){
+    const open=document.createElement('button');open.type='button';open.className='pdf-open';open.append(icon('eye'),'開く');open.title='この PDF を開く';
+    open.onclick=()=>openPdfBlock(blockOf(b.id)||b);
+    const pages=document.createElement('button');pages.type='button';pages.className='pdf-pages';pages.append(icon('file-plus'),'ページにする');pages.title='この PDF をノートのページとして取り込む';
+    pages.onclick=()=>pdfBlockToPages(blockOf(b.id)||b);
+    bar.append(open,pages);
+   }
    bar.append(remove);el.append(bar);
    if(b.type==='text'){
     const ed=document.createElement('div');ed.className='editor';ed.contentEditable='true';ed.dataset.placeholder='ここに入力…';ed.spellcheck=false;
@@ -1491,6 +1500,13 @@ function renderBlocks() {
     el.append(mediaView(b,el));
    } else {
     const img=document.createElement('img');img.src=b.src;img.alt=b.name||'貼り付けた画像';img.draggable=false;el.append(img);
+    if(b.pdfId){
+     el.classList.add('pdf-file');const tag=document.createElement('div');tag.className='pdf-tag';
+     const mark=document.createElement('span');mark.className='pdf-mark';mark.textContent='PDF';
+     const nm=document.createElement('span');nm.className='pdf-name';nm.textContent=String(b.name||'PDF').replace(/\.pdf$/i,'');
+     tag.append(mark,nm);if(b.pdfPages){const c=document.createElement('span');c.className='pdf-count';c.textContent=b.pdfPages+' ページ';tag.append(c);}
+     el.append(tag);
+    }
    }
    const rs=document.createElement('div');rs.className='resize';rs.setAttribute('aria-label',b.type==='image'?'大きさを変える':'幅を変える');el.append(rs);
    blocksLayer.append(el);
@@ -1695,6 +1711,7 @@ $('image-file').onchange=e=>{const files=[...e.target.files];if(files.length)ins
 document.addEventListener('paste',e=>{
  if(!ready||e.defaultPrevented)return;const files=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
  if(!files.length){
+  const pdf=[...(e.clipboardData?.files||[])].find(isPdf);if(pdf){e.preventDefault();openPdfDialog(pdf);return;}
   if(isTyping(e.target))return;
   // 余白ノート・日記カレンダーのクリップ、または普通の文章(新しい入力欄にする)
   const clip=decodeClip(e.clipboardData?.getData('text/html'));
@@ -1718,8 +1735,10 @@ document.addEventListener('paste',e=>{
 window.addEventListener('dragover',e=>e.preventDefault());
 window.addEventListener('drop',e=>{
  e.preventDefault();if(!ready)return;
- const files=[...(e.dataTransfer?.files||[])].filter(f=>f.type.startsWith('image/'));if(!files.length)return;
- const inside=sheet.contains(e.target);insertImages(files,inside?coordinates(e):null);
+ const all=[...(e.dataTransfer?.files||[])],files=all.filter(f=>f.type.startsWith('image/'));
+ const inside=sheet.contains(e.target);
+ if(!files.length){const pdf=all.find(isPdf);if(pdf)openPdfDialog(pdf,inside?coordinates(e):null);return;}
+ insertImages(files,inside?coordinates(e):null);
 });
 // ---- お絵かきツールからの受け取り ----
 // 同じ kusimaru.github.io 上の「お絵かきツール」が、共有の IndexedDB('oekaki-share' / 'inbox')に
@@ -1850,6 +1869,110 @@ async function oekakiDiag(){
  const ua=/Edg\//.test(navigator.userAgent)?'Edge':/Chrome\//.test(navigator.userAgent)?'Chrome':/Safari\//.test(navigator.userAgent)?'Safari':'その他';
  message('【診断】受け取り機能: 有効(版 3) / ブラウザ: '+ua+' / アプリ表示: '+(isStandaloneApp()?'はい':'いいえ')+' / 受け渡し箱の画像: '+n+' 枚');
 }
+// ---- PDF: as note pages, or as a file card ----
+// As pages: each PDF page becomes a new note page holding a picture of it (several pages go into a new
+// folder named after the PDF), so it can be written on and syncs like any page.
+// As a file: a card (an ordinary image block showing the first page, plus pdfId) is put on the page and the
+// PDF itself is kept in this device's media store like recordings. Older app versions just see a picture,
+// so synced notebooks stay valid for them.
+const PDF_MAX_PAGES=50;
+let pdfJob=null; // {file, pdf, point, fromCard, busy, cancel}
+const pdfName=f=>String(f?.name||'PDF').replace(/\.pdf$/i,'').trim().slice(0,80)||'PDF';
+const imageBytes=()=>doc.pages.reduce((n,pg)=>n+pg.blocks.reduce((m,b)=>m+(b.src?.length||0),0),0);
+function setPdfBusy(on){for(const id of ['pdf-as-pages','pdf-as-file','pdf-from','pdf-to'])$(id).disabled=on;$('pdf-cancel').lastChild.textContent=on?'止める':'やめる';}
+function closePdfDialog(){const job=pdfJob;pdfJob=null;if($('pdf-dialog').open)$('pdf-dialog').close();try{job?.pdf?.destroy();}catch{}}
+async function openPdfDialog(file,point=null,fromCard=false){
+ if(!ready)return;
+ if(document.body.classList.contains('reading')){message('PDF を読み込むには「編集に戻る」を押してください。');return;}
+ if(pdfJob){message('PDF を読み込んでいます。終わるまでお待ちください。');return;}
+ pdfJob={file,pdf:null,point,fromCard,busy:true,cancel:false};
+ message('PDF を開いています…');
+ let pdf;try{pdf=await openPdf(file);}catch(e){pdfJob=null;message('PDF を読み込めませんでした。'+(e.message||''));return;}
+ $('message').hidden=true;
+ Object.assign(pdfJob,{pdf,busy:false});
+ const n=pdf.numPages;
+ $('pdf-title').textContent=pdfName(file)+'.pdf';
+ $('pdf-info').textContent=n+' ページ・'+(file.size<1048576?Math.max(1,Math.round(file.size/1024))+' KB':(file.size/1048576).toFixed(1)+' MB');
+ $('pdf-from').max=$('pdf-to').max=String(n);$('pdf-from').value='1';$('pdf-to').value=String(Math.min(n,PDF_MAX_PAGES));
+ $('pdf-range-note').textContent=n>PDF_MAX_PAGES?'一度に取り込めるのは '+PDF_MAX_PAGES+' ページまでです。続きは、もう一度ページの番号を選んで取り込んでください。':'';
+ $('pdf-file-choice').hidden=fromCard;$('pdf-progress').hidden=true;setPdfBusy(false);
+ $('pdf-dialog').showModal();
+}
+async function importPdfPages(){
+ const job=pdfJob;if(!job||job.busy)return;
+ const n=job.pdf.numPages;
+ let from=clamp(Math.round(Number($('pdf-from').value)||1),1,n),to=clamp(Math.round(Number($('pdf-to').value)||n),1,n);
+ if(to<from)[from,to]=[to,from];
+ to=Math.min(to,from+PDF_MAX_PAGES-1);
+ const count=to-from+1;
+ if(doc.pages.length+count>500){message('ページは全部で500ページまでです。取り込むページを減らしてください。');return;}
+ job.busy=true;setPdfBusy(true);$('pdf-progress').hidden=false;
+ finish();
+ const sec=currentSection(),name=pdfName(job.file),here=page();
+ const folder=count>1?addFolder(doc,sec.id,name,null):null; // a new folder in the section, named after the PDF
+ const made=[];let stop='';
+ for(let i=from;i<=to;i++){
+  if(job.cancel){stop='途中で止めました。';break;}
+  $('pdf-progress').textContent='取り込み中… '+(i-from+1)+' / '+count+' ページ';
+  let img;
+  try{img=await renderPdfPage(job.pdf,i);}catch(e){stop=i+' ページ目を読み込めなかったため、そこで止めました。';break;}
+  if(job.cancel){stop='途中で止めました。';break;}
+  if(imageBytes()+img.src.length>60000000){stop='画像の容量の上限に達したため、'+i+' ページ目の前で止めました。';break;}
+  let w=W,h=Math.max(24,Math.round(W*img.height/img.width));
+  if(h>MAX_HEIGHT-240){h=MAX_HEIGHT-240;w=Math.max(40,Math.round(h*img.width/img.height));}
+  const pg=newPage(count>1?name+'（'+i+'ページ目）':name,sec.id);
+  pg.blocks=[{id:crypto.randomUUID(),type:'image',x:0,y:0,width:w,height:h,src:img.src,name:(name+' '+i+'ページ目').slice(0,100)}];
+  pg.height=Math.min(MAX_HEIGHT,Math.max(760,h+240));
+  doc.pages.push(pg);
+  if(folder)setPageFolder(doc,pg.id,folder.id);
+  made.push(pg);changed(pg);
+ }
+ if(folder&&!made.length)deleteFolder(doc,folder.id);
+ closePdfDialog();
+ if(!made.length){message('PDF を取り込めませんでした。'+stop);changed(here);renderPages();return;}
+ if(folder){closedFolders.delete(folder.id);saveClosedFolders();}
+ doc.activeId=made[0].id;selectedSectionId=null;showPage();changed(made[0]);
+ message('PDF「'+name+'」の '+made.length+' ページを、新しいページとして取り込みました'+(folder?'（フォルダ「'+folder.name+'」の中）':'')+'。'+(stop?' '+stop:''));
+}
+async function attachPdfFile(){
+ const job=pdfJob;if(!job||job.busy)return;
+ job.busy=true;setPdfBusy(true);$('pdf-progress').hidden=false;$('pdf-progress').textContent='貼り付けています…';
+ try{
+  const name=pdfName(job.file),pages=job.pdf.numPages;
+  let img;try{img=await renderPdfPage(job.pdf,1,480,800,.8);}catch{img=pdfPlaceholder(name);}
+  const p=page();if(!p)throw new Error('貼り付け先のページが見つかりません。');
+  const w=200,h=Math.max(24,Math.round(w*img.height/img.width));
+  const x=job.point?clamp(Math.round(job.point[0]),0,pw(p)-w):64,y=job.point?clamp(Math.round(job.point[1]),0,MAX_HEIGHT-h):nextFreeY(p);
+  if(y+h>MAX_HEIGHT)throw new Error('ページの下端に空きがありません。新しいページに貼ってください。');
+  const blob=new Blob([job.file],{type:'application/pdf'}),id=crypto.randomUUID();
+  const fileName=await saveToFolder(name,blob,'pdf');
+  await putMedia(id,{blob,kind:'pdf',name,type:'application/pdf',pages,createdAt:Date.now(),fileName});
+  const before=snapshot(p);
+  p.blocks=[...p.blocks,{id:crypto.randomUUID(),type:'image',x,y,width:w,height:h,src:img.src,name:(name+'.pdf').slice(0,100),pdfId:id,pdfPages:pages}];
+  growPage(p,y+h+80);commit(before,p);activeBlock=p.blocks.at(-1).id;
+  closePdfDialog();renderPage();refreshMediaUsage();
+  message('PDF「'+name+'」を貼りました。札を押して出てくる「開く」で見られます。PDF そのものはこの端末にだけ保存されています。');
+ }catch(e){job.busy=false;setPdfBusy(false);$('pdf-progress').hidden=true;message('PDF を貼れませんでした。'+(e.message||''));}
+}
+async function pdfFileOf(b){
+ let rec=null;try{rec=await getMedia(b.pdfId);}catch{}
+ if(!rec?.blob){message('この PDF はこの端末に入っていません。PDF を貼った端末で開いてください。（「ページとして取り込む」で取り込んだページは、どの端末でも見られます。）');return null;}
+ return new File([rec.blob],(rec.name||pdfName({name:b.name}))+'.pdf',{type:'application/pdf'});
+}
+async function openPdfBlock(b){
+ const win=window.open('','_blank'); // opened right away, inside the tap, so it is not blocked as a pop-up
+ const file=await pdfFileOf(b);if(!file){win?.close();return;}
+ const url=URL.createObjectURL(file);setTimeout(()=>URL.revokeObjectURL(url),10*60*1000);
+ if(win){win.location.href=url;return;}
+ const a=document.createElement('a');a.href=url;a.download=file.name;document.body.append(a);a.click();a.remove();
+}
+async function pdfBlockToPages(b){const file=await pdfFileOf(b);if(file)openPdfDialog(file,null,true);}
+$('add-pdf').onclick=()=>{$('pdf-file').value='';$('pdf-file').click();};
+$('pdf-file').onchange=e=>{const f=e.target.files?.[0];if(!f)return;if(!isPdf(f)){message('PDF ファイルを選んでください。');return;}openPdfDialog(f);};
+$('pdf-as-pages').onclick=()=>importPdfPages();
+$('pdf-as-file').onclick=()=>attachPdfFile();
+$('pdf-cancel').onclick=()=>{if(pdfJob?.busy){pdfJob.cancel=true;$('pdf-progress').textContent='止めています…';return;}closePdfDialog();};
+$('pdf-dialog').addEventListener('cancel',e=>{e.preventDefault();$('pdf-cancel').click();}); // Esc = the same as the button
 // ---- pointer handling on the sheet ----
 sheet.tabIndex=-1;
 // Pen proximity: while a pen hovers over or touches the page, mark the sheet so CSS turns off

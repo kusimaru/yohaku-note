@@ -1,7 +1,15 @@
-const CACHE='yohaku-web-v77';
-const ASSETS=['./','./index.html','./style.css','./app.mjs','./model.mjs','./storage.mjs','./richtext.mjs','./clip.mjs','./svgexport.mjs','./sync.mjs','./media.mjs','./ai.mjs','./icon.svg','./manifest.webmanifest','./touch-test.html'].map(p=>new URL(p,self.location).href);
+const CACHE='yohaku-web-v78';
+const ASSETS=['./','./index.html','./style.css','./app.mjs','./model.mjs','./storage.mjs','./richtext.mjs','./clip.mjs','./svgexport.mjs','./sync.mjs','./media.mjs','./ai.mjs','./pdf.mjs','./icon.svg','./manifest.webmanifest','./touch-test.html'].map(p=>new URL(p,self.location).href);
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('yohaku-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
+// pdf.js (vendor/pdfjs) is loaded only when a PDF is used; once fetched it is kept (outside the versioned
+// cache, so it survives app updates) and PDFs then work offline as well.
+const PDFJS_CACHE='pdfjs-5.6.205';
+self.addEventListener('fetch',e=>{
+ const u=new URL(e.request.url);
+ if(e.request.method!=='GET'||u.origin!==self.location.origin||!u.pathname.includes('/vendor/pdfjs/'))return;
+ e.respondWith(caches.open(PDFJS_CACHE).then(c=>c.match(e.request,{ignoreSearch:true}).then(hit=>hit||fetch(e.request).then(res=>{if(res.ok)c.put(e.request,res.clone());return res;}))));
+});
 self.addEventListener('fetch',e=>{
  const url=new URL(e.request.url);url.search='';url.hash='';
  if(e.request.method!=='GET'||url.origin!==self.location.origin||!ASSETS.includes(url.href))return;

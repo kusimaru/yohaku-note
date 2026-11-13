@@ -66,7 +66,7 @@ export function makeRecorder(stream,kind){
 }
 export const stamp=(d=new Date())=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'-'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+String(d.getSeconds()).padStart(2,'0');
 export const fmtTime=s=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+':':'')+String(m).padStart(h?2:1,'0')+':'+String(x).padStart(2,'0');};
-export const extOf=type=>/mp4/.test(type)?(type.startsWith('audio')?'m4a':'mp4'):/ogg/.test(type)?'ogg':/wav/.test(type)?'wav':/mpeg|mp3/.test(type)?'mp3':'webm';
+export const extOf=type=>/pdf/.test(type)?'pdf':/mp4/.test(type)?(type.startsWith('audio')?'m4a':'mp4'):/ogg/.test(type)?'ogg':/wav/.test(type)?'wav':/mpeg|mp3/.test(type)?'mp3':'webm';
 
 // ---- transcription: decode → 16 kHz mono → ≤10-minute WAV parts → speech-to-text API ----
 export function encodeWav(samples,rate){ // 16-bit PCM mono

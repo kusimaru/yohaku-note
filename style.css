@@ -1036,3 +1036,17 @@ body.quick-memo #paper-viewport>.paper{margin:auto}
 /* with a name on several lines, ＋ and … stay level with the first line */
 body .nav-pages .folder-add,.nav-pages .folder-item .item-menu-button{top:calc(var(--ui-btn)/2)}
 .trash-item .trash-name{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+/* PDF: the file card (a picture of the first page with a label) and the import dialog */
+.block.pdf-file img{border:1px solid #c9d3cc;border-radius:4px;box-sizing:border-box;box-shadow:0 2px 8px #203b3318;background:#fff}
+.pdf-tag{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:baseline;gap:6px;padding:5px 8px;background:#ffffffee;border-top:1px solid #dce3d9;border-radius:0 0 4px 4px;font-size:13px;line-height:1.35;color:#33433c;pointer-events:none}
+.pdf-tag .pdf-mark{flex:none;font-weight:700;color:#fff;background:#b8402f;border-radius:3px;padding:0 5px;font-size:11px}
+.pdf-tag .pdf-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.pdf-tag .pdf-count{flex:none;color:#5f7166;font-size:12px}
+.pdf-dialog .pdf-choice{border:1px solid #dce3d9;border-radius:10px;padding:10px 12px;margin:10px 0}
+.pdf-dialog .pdf-choice>button{font-size:15px;min-height:44px;gap:6px}
+.pdf-dialog .pdf-choice p{margin:6px 0 0}
+.pdf-dialog .pdf-range{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;font-size:14px}
+.pdf-dialog .pdf-range input{width:5.5em;margin:0;min-height:40px;font-size:15px;padding:4px 8px;border:1px solid #dce3dd;border-radius:8px;box-sizing:border-box}
+.pdf-dialog .pdf-progress{font-size:15px;color:#294e48;font-weight:600}
+.pdf-dialog #pdf-range-note:empty{display:none}
+.block.pdf-file .block-bar{width:max-content}.block.pdf-file .block-bar button{white-space:nowrap}

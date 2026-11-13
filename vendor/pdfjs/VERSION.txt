@@ -1,0 +1,1 @@
+pdfjs-dist 5.6.205 (legacy build) — https://github.com/mozilla/pdf.js — Apache-2.0 (LICENSE). cmaps/standard_fonts/wasm come from the same package.

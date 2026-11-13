@@ -1,4 +1,4 @@
-import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, separateTrashedCopies, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, folderOf, foldersIn, pageFolder, addFolder, renameFolder, deleteFolder, setPageFolder, moveFolder, setFolderPlace, pageColumn, folderToSection, folderParent, foldersUnder, folderPath, folderTree, setFolderParent, sectionToFolder, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
+import { PAGE_WIDTH as W, MAX_HEIGHT, MAX_WIDTH, pageWidth as pw, newPage, separateTrashedCopies, newTextBlock, inkWidth, hitStroke, erasePart, splitByPolygon, pointInPolygon, validateBackup, upgradeNotebook, folderOf, foldersIn, pageFolder, addFolder, renameFolder, deleteFolder, setPageFolder, moveFolder, setFolderPlace, pageColumn, folderToSection, folderParent, foldersUnder, folderPath, folderTree, setFolderParent, trashFolder, TRASH_MAX, sectionToFolder, ensureStructure, mergeStructure, observeStructure, structureMeta, notebookOf, sectionOf, sectionsIn, pagesIn, addNotebook, addSection, renameNotebook, renameSection, setSectionColor, setNotebookColor, movePage, moveSection, moveNotebook, deletePage, deleteSection, deleteNotebook, restoreTrash, purgeTrash, emptyTrash, mergeNotebook, SECTION_COLORS } from './model.mjs';
 import { openStore, loadNotebook, saveNotebook, migrateNotebook } from './storage.mjs';
 import { domToRuns, runsToDom, toHex } from './richtext.mjs';
 import { pageToSvg } from './svgexport.mjs';
@@ -270,7 +270,7 @@ function openMenu(target,rect,holder) {
  menu.style.left=Math.max(4,left)+'px';menu.style.top=Math.max(4,top)+'px';
  $('menu-delete-label').textContent=target.type==='page'?'ページをゴミ箱へ':target.type==='folder'?'フォルダをやめる（中のページは残す）':target.type==='section'?'セクションをゴミ箱へ（中のページも）':'ノートブックをゴミ箱へ（中身ごと）';
  $('menu-delete').disabled=target.type==='notebook'&&doc.notebooks.length<2;
- $('menu-to-section').hidden=target.type!=='folder';$('menu-new-subfolder').hidden=target.type!=='folder';
+ $('menu-to-section').hidden=target.type!=='folder';$('menu-trash-folder').hidden=target.type!=='folder';$('menu-new-subfolder').hidden=target.type!=='folder';
  $('menu-move-to').hidden=target.type!=='folder'&&target.type!=='section';
  $('menu-move-to-label').textContent=target.type==='section'?'ほかのセクションの中へ（フォルダにする）…':'ほかの場所へ移動…';
  $('menu-rename').focus();
@@ -360,8 +360,22 @@ $('menu-to-section').onclick=()=>{const t=menuTarget;closeMenu();if(!t||t.type!=
  const sibs=sectionsIn(doc,sec.notebookId),i=sibs.findIndex(x=>x.id===sec.id);
  makeSectionFromFolder(t.id,sec.notebookId,sibs[i+1]?.id||null);
 };
+// the trash holds at most TRASH_MAX entries (a notebook with more would not open), so deleting stops before that
+function trashFull(n=1){if((doc.trash||[]).length+n<=TRASH_MAX)return false;message('ゴミ箱がいっぱいになるため、ゴミ箱へ入れられません（ゴミ箱は'+TRASH_MAX+'件まで）。先にゴミ箱の古いものを「完全に削除」してください。');return true;}
+$('menu-trash-folder').onclick=()=>{const t=menuTarget;closeMenu();if(!t||t.type!=='folder')return;
+ const f=folderOf(doc,t.id);if(!f)return;
+ const tree=folderTree(doc,t.id),n=doc.pages.filter(p=>p.folderId&&tree.has(p.folderId)).length;
+ if(trashFull(n))return;
+ if(!confirm('フォルダ「'+f.name+'」と、中の '+n+' ページをゴミ箱へ入れます。よろしいですか？\n（ゴミ箱の「元に戻す」で、フォルダごと元に戻せます）'))return;
+ finish();const r=trashFolder(doc,t.id);if(!r)return;
+ for(const e of r.entries)histories.delete(e.pages[0].id);
+ closedFolders.delete(t.id);saveClosedFolders();
+ selectedSectionId=null;showPage();changed();renderPages();
+ message('フォルダ「'+r.name+'」と中の '+r.entries.length+' ページをゴミ箱へ移動しました。左下の「ゴミ箱」から、フォルダごと元に戻せます。');
+};
 $('menu-delete').onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;
  if(t.type==='folder'){const f=folderOf(doc,t.id),inIds=doc.pages.filter(x=>x.folderId===t.id).map(x=>x.id);const n=deleteFolder(doc,t.id);if(n===null)return;touchPages(inIds);changed();breadcrumb();renderPages();message('フォルダ「'+(f?.name||'')+'」をやめました。中のページ（'+n+' ページ）はそのまま残っています。');return;}
+ if(trashFull())return;
  finish();
  const entry=t.type==='page'?deletePage(doc,t.id):t.type==='section'?deleteSection(doc,t.id):deleteNotebook(doc,t.id);
  if(!entry){if(t.type==='notebook')message('最後のノートブックは削除できません。');return;}
@@ -763,6 +777,7 @@ $('multi-move').onclick=()=>{
 };
 $('multi-delete').onclick=()=>{
  const ids=selectedIds(),kind=multi.kind;if(!ids.length)return;
+ if(trashFull(ids.length))return;
  finish();let n=0,stopped=false;
  for(const id of ids){
   const entry=kind==='page'?deletePage(doc,id):kind==='section'?deleteSection(doc,id):deleteNotebook(doc,id);
@@ -784,11 +799,21 @@ function renderTrash() {
   const item=document.createElement('div');item.className='trash-item';item.dataset.trashId=t.id;
   const kindIcon={page:'file',section:'folder',category:'folder',notebook:'book'}[t.kind]||'file';
   const kindLabel={section:'セクション',category:'セクション',notebook:'ノートブック'}[t.kind];
-  const name=document.createElement('span');name.className='trash-name';name.append(icon(kindIcon),' '+(t.name||'名称未設定')+(kindLabel?'（'+kindLabel+'・'+t.pages.length+'ページ）':''));
+  const group=t.kind==='page'&&t.pages[0]?.trashGroup,folderName=group&&Array.isArray(t.pages[0].trashFolders)?t.pages[0].trashFolders[0]:'';
+  const name=document.createElement('span');name.className='trash-name';name.append(icon(kindIcon),' '+(t.name||'名称未設定')+(kindLabel?'（'+kindLabel+'・'+t.pages.length+'ページ）':folderName?'（フォルダ「'+folderName+'」）':''));
   const when=document.createElement('small');when.textContent='削除: '+new Date(t.deletedAt).toLocaleString('ja-JP');
   const row=document.createElement('div');
   const restore=document.createElement('button');restore.type='button';restore.className='restore';restore.append(icon('restore'),'元に戻す');
-  restore.onclick=()=>{finish();const e=restoreTrash(doc,t.id);if(!e)return;view='pages';selectedSectionId=null;showPage();changed();message('「'+(e.name||'名称未設定')+'」を元に戻しました。');};
+  restore.onclick=()=>{
+   finish();
+   if(group){ // a page from a deleted folder: the whole folder comes back
+    const ids=(doc.trash||[]).filter(x=>x.kind==='page'&&x.pages[0]?.trashGroup===group).map(x=>x.id);let n=0,first=null;
+    for(const id of ids){const e=restoreTrash(doc,id);if(e){n++;first??=e.pages[0]?.id;}}
+    if(!n)return;if(first&&doc.pages.some(x=>x.id===first))doc.activeId=first;
+    view='pages';selectedSectionId=null;showPage();changed();message('フォルダ「'+(folderName||'')+'」と '+n+' ページを元に戻しました。');return;
+   }
+   const e=restoreTrash(doc,t.id);if(!e)return;view='pages';selectedSectionId=null;showPage();changed();message('「'+(e.name||'名称未設定')+'」を元に戻しました。');
+  };
   const purge=document.createElement('button');purge.type='button';purge.className='purge';purge.append(icon('x'),'完全に削除');
   purge.onclick=()=>{if(purge.dataset.armed){purgeTrash(doc,t.id);changed();renderPages();}else{purge.dataset.armed='1';purge.replaceChildren(icon('x'),'もう一度押すと完全に削除');setTimeout(()=>{delete purge.dataset.armed;purge.replaceChildren(icon('x'),'完全に削除');},4000);}};
   row.append(restore,purge);item.append(name,when,row);$('pages').append(item);

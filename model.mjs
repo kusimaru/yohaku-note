@@ -216,6 +216,39 @@ export function deleteFolder(doc,id){
  for(const x of doc.folders)if(x.parentId===id){if(up)x.parentId=up.id;else delete x.parentId;}
  doc.folders=doc.folders.filter(x=>x.id!==id);return n;
 }
+// Put a folder (with the folders inside it) and every page in it into the trash. Each page becomes its own
+// trash entry of kind 'page' (the kind older app versions know, so their check still passes); the pages
+// remember the folder names (trashFolders, from the deleted folder down) and a shared trashGroup, so restoring
+// one of them restores them all and rebuilds the folder (restoreFolderOf).
+export const TRASH_MAX=500; // validateBackup refuses a notebook with more trash entries than this
+export function trashFolder(doc,id){
+ const f=folderOf(doc,id);if(!f)return null;
+ const tree=folderTree(doc,id),group=crypto.randomUUID(),parentId=f.parentId||null;
+ const pages=doc.pages.filter(p=>p.folderId&&tree.has(p.folderId));
+ if((doc.trash||[]).length+pages.length>TRASH_MAX)return null;
+ for(const p of pages){
+  const path=folderPath(doc,folderOf(doc,p.folderId)),i=path.findIndex(x=>x.id===id);
+  p.trashFolders=path.slice(Math.max(0,i)).map(x=>x.name);p.trashGroup=group;if(parentId)p.trashFolderParent=parentId;
+ }
+ const entries=pages.map(p=>deletePage(doc,p.id)).filter(Boolean);
+ for(const fid of tree)deleteFolder(doc,fid);
+ return {name:f.name,entries,group};
+}
+// A page restored from the trash that came out of a deleted folder goes back into a folder of the same
+// name (made again when needed, inside the folder it used to be in if that one still exists).
+function restoreFolderOf(doc,p){
+ const names=Array.isArray(p.trashFolders)?p.trashFolders.filter(n=>typeof n==='string'&&n).slice(0,20):[];
+ let parent=typeof p.trashFolderParent==='string'?folderOf(doc,p.trashFolderParent):null;
+ delete p.trashFolders;delete p.trashGroup;delete p.trashFolderParent;
+ if(!names.length)return;
+ if(parent&&parent.sectionId!==p.sectionId)parent=null;
+ for(const name of names){
+  let f=foldersUnder(doc,p.sectionId,parent?.id??null).find(x=>x.name===name);
+  if(!f)f=addFolder(doc,p.sectionId,name,parent?.id??null);
+  if(!f)return;parent=f;
+ }
+ delete p.folderId;setPageFolder(doc,p.id,parent.id);
+}
 // Put a page into a folder (or take it out with folderId null). The folder must be in the page's section.
 export function setPageFolder(doc,pageId,folderId){
  const p=doc.pages.find(x=>x.id===pageId);if(!p)return false;
@@ -481,6 +514,7 @@ export function restoreTrash(doc,entryId) {
   if(doc.pages.some(x=>x.id===p.id))p.id=crypto.randomUUID();
   if(!sectionOf(doc,p.sectionId))p.sectionId=doc.sections[0].id;
   doc.pages.push(p);movePage(doc,p.id,p.sectionId);
+  if(p.trashFolders||p.trashGroup)restoreFolderOf(doc,p);
  }
  ensureStructure(doc);
  if(entry.pages[0])doc.activeId=entry.pages[0].id;

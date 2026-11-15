@@ -1053,3 +1053,16 @@ body .nav-pages .folder-add,.nav-pages .folder-item .item-menu-button{top:calc(v
 .pdf-dialog .pdf-progress{font-size:15px;color:#294e48;font-weight:600}
 .pdf-dialog #pdf-range-note:empty{display:none}
 .block.pdf-file .block-bar{width:max-content}.block.pdf-file .block-bar button{white-space:nowrap}
+
+/* ページを左へずらすと、後ろから赤いゴミ箱ボタンが出る */
+.page-item>.page-button,.page-item>.item-menu-button{touch-action:pan-y}
+.page-item>.page-button,.page-item>.item-menu-button{transform:translateX(var(--sx,0px))}
+.page-item.swipe-anim>.page-button,.page-item.swipe-anim>.item-menu-button{transition:transform .18s ease}
+.page-item.swiping{overflow:hidden}
+.page-item.swiping>.page-button{background:#fff}
+.swipe-delete{display:none}
+.page-item.swiping>.swipe-delete{display:flex;position:absolute;right:0;top:2px;bottom:2px;width:76px;min-height:0;padding:0;align-items:center;justify-content:center;background:#c8372d;border:0;border-radius:10px;color:#fff;z-index:0}
+.page-item.swiping>.swipe-delete .icon{width:30px;height:30px;stroke-width:2}
+.page-item.swiping>.swipe-delete:hover,.page-item.swiping>.swipe-delete:focus-visible{background:#a92a21}
+.page-item>.page-button,.page-item>.item-menu-button{position:relative;z-index:1}
+.page-item>.item-menu-button{position:absolute}

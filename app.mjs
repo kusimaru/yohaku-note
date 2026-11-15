@@ -108,6 +108,7 @@ function selectSection(id) {
  const first=pagesIn(doc,id)[0];
  if(first){openPage(first.id);}else{selectedSectionId=id;renderPages();}
 }
+let swipe=null,swipedItem=null,eatSwipeClick=false; // swiping a page row to the left (see 'swipe a page' below)
 function renderPages() {
  $('pages').replaceChildren();closeMenu();ensureStructure(doc);
  $('trash-count').textContent=(doc.trash||[]).length;$('trash-toggle').classList.toggle('active',view==='trash');$('trash-toggle').setAttribute('aria-pressed',String(view==='trash'));
@@ -194,6 +195,7 @@ function renderSectionCards(nb) {
  $('page-count').textContent=secs.length;
 }
 function renderPageList() {
+ swipe=null;swipedItem=null; // the rows are made again
  const browsing=browsingNotebookId?notebookOf(doc,browsingNotebookId):null;if(browsingNotebookId&&!browsing)browsingNotebookId=null;
  const col=document.querySelector('.nav-pages');col.classList.toggle('browse',!!browsing||browsingNotebooks);col.classList.toggle('browse-notebooks',browsingNotebooks);
  if(browsingNotebooks){renderNotebookCards();return;}
@@ -206,7 +208,9 @@ function renderPageList() {
   const name=el('span'),label=el('span','',pg.title||'名称未設定');name.append(selMark(),icon('page'),label);button.append(name);if(isSelected('page',pg.id))button.classList.add('selected');
   const sub=el('small','',new Date(pg.updatedAt).toLocaleDateString('ja-JP'));button.append(sub);
   button.onclick=e=>{if(wantsSelect(e)){toggleSelect('page',pg.id,e.shiftKey);return;}openPage(pg.id);};
-  const item=el('div','page-item');item.append(button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));into.append(item);
+  const del=el('button','swipe-delete');del.type='button';del.tabIndex=-1;del.title='ゴミ箱へ';del.setAttribute('aria-label','「'+(pg.title||'名称未設定')+'」をゴミ箱へ');del.append(icon('bin'));
+  del.onclick=()=>{swipedItem=null;trashPage(pg.id);};
+  const item=el('div','page-item');item.append(del,button,menuButton({type:'page',id:pg.id,label:pg.title||'名称未設定'}));into.append(item);
  };
  // folders sit among the pages of their level (folder.before) and can hold folders; with a sort order, folders come first
  const activePath=new Set(folderPath(doc,pageFolder(doc,page())).map(x=>x.id));
@@ -373,7 +377,14 @@ $('menu-trash-folder').onclick=()=>{const t=menuTarget;closeMenu();if(!t||t.type
  selectedSectionId=null;showPage();changed();renderPages();
  message('フォルダ「'+r.name+'」と中の '+r.entries.length+' ページをゴミ箱へ移動しました。左下の「ゴミ箱」から、フォルダごと元に戻せます。');
 };
+function trashPage(id){
+ if(trashFull())return;
+ finish();const entry=deletePage(doc,id);if(!entry)return;
+ histories.delete(id);selectedSectionId=null;showPage();changed();
+ message('ページ「'+(entry.name||'名称未設定')+'」をゴミ箱へ移動しました。左下の「ゴミ箱」から元に戻せます。');
+}
 $('menu-delete').onclick=()=>{const t=menuTarget;closeMenu();if(!t)return;
+ if(t.type==='page'){trashPage(t.id);return;}
  if(t.type==='folder'){const f=folderOf(doc,t.id),inIds=doc.pages.filter(x=>x.folderId===t.id).map(x=>x.id);const n=deleteFolder(doc,t.id);if(n===null)return;touchPages(inIds);changed();breadcrumb();renderPages();message('フォルダ「'+(f?.name||'')+'」をやめました。中のページ（'+n+' ページ）はそのまま残っています。');return;}
  if(trashFull())return;
  finish();
@@ -879,6 +890,7 @@ function dropTarget(e) {
  return null;
 }
 navEl.addEventListener('dragstart',e=>{
+ if(swipeInsteadOfDrag(e)){e.preventDefault();return;}
  const t=e.target instanceof Element?e.target:null;const pb=t?.closest('.page-button'),st=t?.closest('.section-tab'),nb=t?.closest('.notebook-button'),fb=t?.closest('.folder-button');
  if(fb){dragging={type:'folder',id:fb.dataset.folderId,ids:[fb.dataset.folderId]};fb.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain','folder');}catch{}return;}
  if(pb){dragging={type:'page',id:pb.dataset.pageId};pb.classList.add('dragging');}
@@ -890,13 +902,91 @@ navEl.addEventListener('dragstart',e=>{
  for(const id of dragging.ids){const node=navEl.querySelector(dragging.type==='page'?`.page-button[data-page-id="${id}"]`:dragging.type==='section'?`.section-tab[data-section-id="${id}"]`:`.notebook-button[data-notebook-id="${id}"]`);node?.classList.add('dragging');}
  e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',dragging.type);}catch{}
 });
+// ---- swipe a page to the left: a red button with a trash can appears behind it; pressing it puts the page in
+// the trash (左下の「ゴミ箱」から元に戻せる). Only a flat drag to the left counts: dragging up / down or slanting
+// still reorders the pages or moves them to a section. Mouse and pen first start the browser's own drag, so
+// dragstart decides (swipeInsteadOfDrag); a finger gives pointer moves (touch-action: pan-y on the row).
+const SWIPE_W=76;
+function setSwipe(item,x,anim){
+ item.classList.toggle('swipe-anim',!!anim);item.classList.toggle('swiping',x<0);item.style.setProperty('--sx',x+'px');
+ const del=item.querySelector('.swipe-delete');if(del)del.tabIndex=x<=-SWIPE_W?0:-1;
+}
+function closeSwipe(){if(!swipedItem)return;const it=swipedItem;swipedItem=null;setSwipe(it,0,true);}
+const flatLeft=(dx,dy)=>dx<0&&Math.abs(dx)>=Math.abs(dy)*1.7;
+function beginSwipe(){
+ if(!swipe||swipe.on)return;swipe.on=true;
+ if(swipedItem&&swipedItem!==swipe.item)closeSwipe();
+ try{swipe.item.querySelector('.page-button').setPointerCapture(swipe.id);}catch{}closeMenu();
+}
+function swipeInsteadOfDrag(e){
+ if(!swipe||!(e.target instanceof Element)||!e.target.closest('.page-button'))return false;
+ const dx=e.clientX-swipe.x0,dy=e.clientY-swipe.y0;
+ if(swipe.on||swipe.base<0||flatLeft(dx,dy)){beginSwipe();return true;}
+ swipe=null;return false;
+}
+$('pages').addEventListener('pointerdown',e=>{
+ eatSwipeClick=false;
+ const t=e.target instanceof Element?e.target:null,item=t?.closest('.page-item'); // the page or its 「…」 button
+ if(!item||!item.querySelector('.page-button')||t.closest('.swipe-delete')||(e.pointerType==='mouse'&&e.button!==0)){swipe=null;return;}
+ swipe={id:e.pointerId,x0:e.clientX,y0:e.clientY,item,base:item===swipedItem?-SWIPE_W:0,x:item===swipedItem?-SWIPE_W:0,on:false};
+});
+// a drag that started as a swipe but leaves its row (to the left of the page column, towards the sections, or
+// above / below the row) is a move after all: the same drop as dragging the page there (dropOnNav)
+const navPoint=e=>({target:document.elementFromPoint(e.clientX,e.clientY),clientX:e.clientX,clientY:e.clientY,preventDefault(){}});
+function leavesRow(e){
+ const col=swipe.item.closest('.nav-pages')?.getBoundingClientRect(),r=swipe.item.getBoundingClientRect();
+ return (col&&e.clientX<col.left)||e.clientY<r.top||e.clientY>r.bottom;
+}
+function swipeToMove(){
+ const s=swipe,pb=s.item.querySelector('.page-button'),id=pb.dataset.pageId;s.move=true;
+ if(swipedItem===s.item)swipedItem=null;setSwipe(s.item,0,true);
+ dragging={type:'page',id,ids:isSelected('page',id)?selectedIds():[id]};
+ for(const x of dragging.ids)navEl.querySelector(`.page-button[data-page-id="${x}"]`)?.classList.add('dragging');
+}
+document.addEventListener('pointermove',e=>{
+ if(!swipe||e.pointerId!==swipe.id)return;
+ const dx=e.clientX-swipe.x0,dy=e.clientY-swipe.y0;
+ if(!swipe.on){
+  if(Math.hypot(dx,dy)<8)return;
+  if(flatLeft(dx,dy)||(swipe.base<0&&Math.abs(dx)>Math.abs(dy)))beginSwipe();else{if(e.pointerType==='touch')swipe=null;return;}
+ }
+ if(!swipe.move&&leavesRow(e))swipeToMove();
+ if(swipe.move){clearDropMarks();const t=dropTarget(navPoint(e));if(t)t.mark.classList.add(t.cls);return;}
+ swipe.x=Math.max(-SWIPE_W-30,Math.min(0,swipe.base+dx));setSwipe(swipe.item,swipe.x,false);
+});
+function swipeEnd(e){
+ if(!swipe||e.pointerId!==swipe.id)return;if(swipe.on&&!swipe.move&&e.type==='pointerup'&&leavesRow(e))swipeToMove();
+ const s=swipe;swipe=null;if(!s.on)return;
+ eatSwipeClick=true; // the click that ends this drag does not open the page
+ if(s.move){
+  if(e.type==='pointerup')dropOnNav(navPoint(e));
+  dragging=null;clearDropMarks();for(const x of navEl.querySelectorAll('.dragging'))x.classList.remove('dragging');return;
+ }
+ if(e.type!=='pointercancel'&&s.x<-SWIPE_W/2){swipedItem=s.item;setSwipe(s.item,-SWIPE_W,true);}
+ else{if(swipedItem===s.item)swipedItem=null;setSwipe(s.item,0,true);}
+}
+for(const ev of ['pointerup','pointercancel'])document.addEventListener(ev,swipeEnd);
+// pressing anywhere else closes the opened row; pressing the opened page itself only closes it (does not open the page)
+document.addEventListener('pointerdown',e=>{
+ if(!swipedItem||!(e.target instanceof Element))return;
+ if(e.target.closest('.swipe-delete'))return;
+ if(swipedItem.contains(e.target)&&e.target.closest('.page-button'))return; // a tap closes it on click; a drag to the right closes it too
+ closeSwipe();
+},{capture:true});
+$('pages').addEventListener('click',e=>{
+ const t=e.target instanceof Element?e.target:null,item=t?.closest('.page-item');if(!item||t.closest('.swipe-delete'))return;
+ if(eatSwipeClick){eatSwipeClick=false;e.stopPropagation();e.preventDefault();return;}
+ if(item===swipedItem&&t.closest('.page-button')){e.stopPropagation();e.preventDefault();closeSwipe();}
+},{capture:true});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&swipedItem)closeSwipe();});
 navEl.addEventListener('dragend',()=>{dragging=null;clearDropMarks();for(const x of navEl.querySelectorAll('.dragging'))x.classList.remove('dragging');});
 navEl.addEventListener('dragover',e=>{
  if(!dragging)return;const t=dropTarget(e);clearDropMarks();if(!t)return;
  e.preventDefault();e.dataTransfer.dropEffect='move';t.mark.classList.add(t.cls);
 });
 navEl.addEventListener('dragleave',e=>{if(!navEl.contains(e.relatedTarget))clearDropMarks();});
-navEl.addEventListener('drop',e=>{
+navEl.addEventListener('drop',e=>dropOnNav(e));
+function dropOnNav(e){
  if(!dragging)return;e.preventDefault();const t=dropTarget(e),d=dragging;dragging=null;clearDropMarks();if(!t)return;
  let moved=false;const ids=d.ids||[d.id];
  // the item right after the target that is not being dragged (for 'drop-after')
@@ -936,7 +1026,7 @@ navEl.addEventListener('drop',e=>{
  }
  if(ids.length>1)clearMulti(false);
  if(moved){changed();renderPages();}
-});
+}
 // ---- forms: new page / section / notebook, renames ----
 $('add-notebook').onclick=()=>showForm({kind:'new-notebook'},'新しいノートブック','','作成');
 $('add-folder').onclick=()=>showForm({kind:'new-folder'},'新しいフォルダ（'+currentSection().name+'）','','作成');

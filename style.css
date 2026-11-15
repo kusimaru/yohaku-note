@@ -762,6 +762,9 @@ body #page-title:focus{outline:none;border-bottom-color:#4e8068}
 .page-meta{margin-top:6px}
 .paper-caption,.help{display:none}
 .paper-viewport{border:0;border-radius:0;box-shadow:none;margin:8px 0 0}
+/* 縮小表示で紙が画面より小さいとき、紙の端が見えるように（白い紙の外側を薄い色に。欄は紙の端より外へは動かせない） */
+.paper-viewport{background:#eef1ec}
+.paper{box-shadow:0 0 0 1px #cfd8cb,0 3px 14px #203b2914}
 .canvas-footer{padding:6px 12px 18px}
 @media(max-width:700px){.page-heading{padding:12px 14px 2px}body #page-title{font-size:22px}.tools-sticky{top:48px}}
 /* ribbon: the contextual group drops to its own row when the width is short; items inside a group stay in one line */

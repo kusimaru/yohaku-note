@@ -1054,10 +1054,14 @@ function growPageWidth(p,needed) {
  p.width=next;if(p===page())layout();return true;
 }
 let sizePaper=()=>{};
+// a chosen zoom (not 全体): its scale. The paper is then never narrower than the screen: a zoomed-out page
+// shows more paper to the right instead of empty margins (writing or putting things there widens the page).
+let paperScale=null;
 function layout() {
  if(!doc)return;
- const p=page(),width=pw(p);sizePaper();scale=paper.clientWidth/width||1;sheetRectCache=null;
- sheet.style.setProperty('--ui-inverse-scale',1/scale);sheet.style.width=width+'px';sheet.style.height=p.height+'px';sheet.style.transform='scale('+scale+')';lassoEl.setAttribute('width',width);lassoEl.setAttribute('height',p.height);
+ const p=page(),width=pw(p);sizePaper();scale=paperScale||paper.clientWidth/width||1;sheetRectCache=null;
+ const shown=Math.max(width,Math.floor(paper.clientWidth/scale)); // page units on screen (≥ the page width)
+ sheet.style.setProperty('--ui-inverse-scale',1/scale);sheet.style.width=shown+'px';sheet.style.height=p.height+'px';sheet.style.transform='scale('+scale+')';lassoEl.setAttribute('width',shown);lassoEl.setAttribute('height',p.height);
  paper.style.height=Math.round(p.height*scale)+'px';
  $('page-size').textContent='ページの大きさ 幅 '+width+' × 高さ '+p.height+'（最大 '+MAX_WIDTH+' × '+MAX_HEIGHT+'）';$('grow-page').disabled=!ready||p.height>=MAX_HEIGHT;$('grow-page-x').disabled=!ready||width>=MAX_WIDTH;
  updateViewportCanvas(true);placeBars();
@@ -1132,7 +1136,9 @@ function updateViewportCanvas(force=false) {
 const onViewportScroll=()=>{if(viewRaf)return;viewRaf=requestAnimationFrame(()=>{viewRaf=0;updateViewportCanvas();});};
 window.addEventListener('scroll',onViewportScroll,{passive:true});window.addEventListener('resize',onViewportScroll);
 document.getElementById('paper-viewport')?.addEventListener('scroll',onViewportScroll,{passive:true});
-new ResizeObserver(()=>{if(paper.clientWidth!==lastPaperWidth){lastPaperWidth=paper.clientWidth;layout();}}).observe(paper);
+{const vpEl=document.getElementById('paper-viewport');let lastVp=0;
+ new ResizeObserver(()=>{const v=vpEl?.clientWidth||0;if(paper.clientWidth!==lastPaperWidth||v!==lastVp){lastPaperWidth=paper.clientWidth;lastVp=v;layout();}}).observe(paper);
+ if(vpEl)new ResizeObserver(()=>{const v=vpEl.clientWidth;if(v!==lastVp){lastVp=v;layout();}}).observe(vpEl);}
 let sheetRectCache=null;
 function sheetRect(){if(!sheetRectCache){sheetRectCache=sheet.getBoundingClientRect();requestAnimationFrame(()=>{sheetRectCache=null;});}return sheetRectCache;}
 function coordinates(e) {
@@ -1593,6 +1599,7 @@ document.addEventListener('focusout',e=>{
 });
 function createTextBlock(x,y) {
  const p=page(),before=snapshot(p);
+ if(Math.round(x)+400>pw(page()))growPageWidth(page(),Math.min(MAX_WIDTH,Math.round(x)+400));
  const bx=clamp(Math.round(x)-12,0,pw(page())-240),by=clamp(Math.round(y)-14,0,MAX_HEIGHT-60);
  const block=newTextBlock(bx,by,'');block.width=Math.min(760,pw(page())-bx-24);block.height=72;
  p.blocks=[...p.blocks,block];growPage(p,by+block.height+60);
@@ -1721,6 +1728,7 @@ async function insertImages(files,point) {
    const total=doc.pages.reduce((n,pg)=>n+pg.blocks.reduce((m,b)=>m+(b.src?.length||0),0),0);
    if(total+img.src.length>60000000)throw new Error('試作品の画像容量の上限に達しました。');
    const w=clamp(Math.min(img.width,600),40,pw(page())-48),h=Math.max(24,Math.round(w*img.height/img.width));
+   if(point&&count===0&&point[0]+w>pw(page()))growPageWidth(page(),Math.min(MAX_WIDTH,Math.round(point[0])+w+24));
    const x=point&&count===0?clamp(Math.round(point[0]),0,pw(page())-w):64;
    const y=point&&count===0?clamp(Math.round(point[1]),0,MAX_HEIGHT-h):nextFreeY(p);
    if(y+h>MAX_HEIGHT)throw new Error('ページの下端に空きがありません。新しいページに貼り付けてください。');
@@ -1967,6 +1975,7 @@ async function attachPdfFile(){
   let img;try{img=await renderPdfPage(job.pdf,1,480,800,.8);}catch{img=pdfPlaceholder(name);}
   const p=page();if(!p)throw new Error('貼り付け先のページが見つかりません。');
   const w=200,h=Math.max(24,Math.round(w*img.height/img.width));
+  if(job.point&&job.point[0]+w>pw(p))growPageWidth(p,Math.min(MAX_WIDTH,Math.round(job.point[0])+w+24));
   const x=job.point?clamp(Math.round(job.point[0]),0,pw(p)-w):64,y=job.point?clamp(Math.round(job.point[1]),0,MAX_HEIGHT-h):nextFreeY(p);
   if(y+h>MAX_HEIGHT)throw new Error('ページの下端に空きがありません。新しいページに貼ってください。');
   const blob=new Blob([job.file],{type:'application/pdf'}),id=crypto.randomUUID();
@@ -2798,7 +2807,8 @@ function initializePresentation(){
  sizePaper=()=>{
   recallSectionZoom();
   const z=quickMemo?(quickMemo.zoom??null):zoomFactor(),width=pw(page()); // すぐメモ starts at the whole screen width, whatever zoom the section remembers; a pinch there zooms only that memo
-  paper.style.width=z===null?(width===W?'100%':Math.round(vp.clientWidth*width/W)+'px'):(width*z)+'px';
+  paperScale=z;
+  paper.style.width=z===null?(width===W?'100%':Math.round(vp.clientWidth*width/W)+'px'):Math.max(width*z,vp.clientWidth)+'px';
   updateZoomUi(z); // the slider shows the effective factor, also after page switches and window resizes
  };
  const persistZoom=()=>{try{localStorage.setItem('yohaku-view-zoom',zoomMode==='fit'?'fit':String(customZoom));}catch{}rememberSectionZoom();};
@@ -2811,17 +2821,17 @@ function initializePresentation(){
  // still. The real re-layout at the new zoom happens once, at the end.
  let preview=null,previewRaf=0;
  function beginPreview(cx,cy){
-  finish();const r=vp.getBoundingClientRect(),z0=paper.clientWidth/pw(page()),top=sheet.getBoundingClientRect().top,pr=paper.getBoundingClientRect();
-  preview={z0,z:z0,px:(cx-pr.left)/z0,py:(cy-top)/z0,cx0:cx,cy0:cy,cx,cy,lx:cx-pr.left,ly:cy-pr.top,pl:pr.left,pt:pr.top,vl:r.left+vp.clientLeft,vw:vp.clientWidth};
+  finish();const r=vp.getBoundingClientRect(),z0=scale,top=sheet.getBoundingClientRect().top,pr=paper.getBoundingClientRect();
+  preview={w0:paper.clientWidth,z0,z:z0,px:(cx-pr.left)/z0,py:(cy-top)/z0,cx0:cx,cy0:cy,cx,cy,lx:cx-pr.left,ly:cy-pr.top,pl:pr.left,pt:pr.top,vl:r.left+vp.clientLeft,vw:vp.clientWidth};
   paper.style.transformOrigin='0 0';paper.style.willChange='transform';vp.style.overflow='hidden';
  }
  function drawPreview(){
   if(previewRaf)return;
   previewRaf=requestAnimationFrame(()=>{previewRaf=0;if(!preview)return;
    const f=preview.z/preview.z0;let dx=(preview.cx-preview.cx0)+preview.lx*(1-f),dy=(preview.cy-preview.cy0)+preview.ly*(1-f);
-   // the same place the paper lands after the re-layout: centred when narrower than the screen, otherwise no gap at the sides
-   const w=pw(page())*preview.z,h=page().height*preview.z,left=preview.pl+dx;
-   if(w<=preview.vw)dx=preview.vl+(preview.vw-w)/2-preview.pl;else dx+=Math.min(0,preview.vl-left)+Math.max(0,preview.vl+preview.vw-(left+w));
+   // the same place the paper lands after the re-layout: at the left edge when narrower than the screen (it fills the screen then), otherwise no gap at the sides
+   const w=preview.w0*f,h=page().height*preview.z,left=preview.pl+dx;
+   if(w<=preview.vw)dx=preview.vl-preview.pl;else dx+=Math.min(0,preview.vl-left)+Math.max(0,preview.vl+preview.vw-(left+w));
    if(quickMemo){const top=preview.pt+dy;if(h<=innerHeight)dy=(innerHeight-h)/2-preview.pt;else dy+=Math.min(0,-top)+Math.max(0,innerHeight-(top+h));}
    else dy=Math.min(dy,scrollY); // the page cannot scroll above its top: the paper's top edge never comes down further than that
    paper.style.transform='translate('+dx.toFixed(1)+'px,'+dy.toFixed(1)+'px) scale('+f.toFixed(4)+')';
@@ -2831,8 +2841,8 @@ function initializePresentation(){
   if(!preview)return;if(previewRaf){cancelAnimationFrame(previewRaf);previewRaf=0;}
   const pv=preview;preview=null;paper.style.transform='';paper.style.willChange='';paper.style.transformOrigin='';vp.style.overflow='';
   if(quickMemo)quickMemo.zoom=clampZoom(pv.z);else setCustomZoom(pv.z);layout();
-  const z=paper.clientWidth/pw(page());vp.scrollLeft+=paper.getBoundingClientRect().left-(pv.cx-pv.px*z); // keeps the point under the fingers; a paper narrower than the screen stays centred (CSS)
-  const want=pv.cy-pv.py*z,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
+  vp.scrollLeft+=paper.getBoundingClientRect().left-(pv.cx-pv.px*scale); // keeps the point under the fingers
+  const want=pv.cy-pv.py*scale,now=sheet.getBoundingClientRect().top;if(Math.abs(now-want)>0.5)window.scrollBy(0,now-want);
   if(quickMemo){updateZoomUi(quickMemo.zoom);$('qm-fit').hidden=false;}else{updateZoomUi(customZoom);persistZoom();} // a memo's zoom is not remembered for the section
  }
  // slider: zoom around the middle of what is on screen
